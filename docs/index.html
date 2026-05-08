@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Origin Health — Deduplicador</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#080c0b;--bg3:#141a15;--card:#111711;--card2:#172018;
+  --border:rgba(74,207,120,.12);--border2:rgba(74,207,120,.22);
+  --green:#4acf78;--green-dim:rgba(74,207,120,.08);
+  --text:#f0f4f1;--text2:#8fa893;--text3:#556659;
+  --danger:#e05252;--danger-bg:rgba(224,82,82,.1);
+  --warn:#e0a052;--warn-bg:rgba(224,160,82,.08);
+  --radius:10px;--radius-lg:16px;
+}
+html,body{height:100%;font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.6}
+::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
+
+/* LOGIN */
+#login{min-height:100vh;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
+.l-bg{position:absolute;inset:0;background:radial-gradient(ellipse 80% 60% at 50% 0%,rgba(74,207,120,.07),transparent 70%);pointer-events:none}
+.l-grid{position:absolute;inset:0;background-image:linear-gradient(rgba(74,207,120,.04) 1px,transparent 1px),linear-gradient(90deg,rgba(74,207,120,.04) 1px,transparent 1px);background-size:48px 48px;pointer-events:none}
+.l-box{position:relative;z-index:1;width:420px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:44px 38px}
+.logo{display:flex;align-items:center;gap:9px;margin-bottom:32px}
+.logo-mark{width:32px;height:32px;background:var(--green);border-radius:7px;display:flex;align-items:center;justify-content:center}
+.logo-mark svg{width:17px;height:17px}
+.logo-txt{font-family:'Syne',sans-serif;font-size:16px;font-weight:700;letter-spacing:-.02em}
+.logo-txt span{color:var(--green)}
+h1{font-family:'Syne',sans-serif;font-size:22px;font-weight:600;letter-spacing:-.02em;margin-bottom:5px}
+.sub{font-size:13px;color:var(--text2);margin-bottom:28px}
+.field{margin-bottom:16px}
+.field label{display:block;font-size:11px;font-weight:500;color:var(--text2);letter-spacing:.07em;text-transform:uppercase;margin-bottom:7px}
+.field input,.field select{width:100%;padding:11px 13px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:'Inter',sans-serif;font-size:13px;outline:none;transition:border-color .2s;appearance:none}
+.field input:focus,.field select:focus{border-color:var(--green)}
+.field input::placeholder{color:var(--text3)}
+.field .hint{font-size:11px;color:var(--text3);margin-top:5px}
+.btn-primary{width:100%;padding:12px;background:var(--green);color:#080c0b;border:none;border-radius:var(--radius);font-family:'Syne',sans-serif;font-size:13px;font-weight:700;cursor:pointer;transition:background .2s;margin-top:6px}
+.btn-primary:hover{background:#5fe08a}.btn-primary:disabled{opacity:.5;cursor:not-allowed}
+.l-err{margin-top:12px;padding:9px 13px;background:var(--danger-bg);border:1px solid rgba(224,82,82,.2);border-radius:var(--radius);font-size:12px;color:var(--danger);display:none}
+.l-divider{height:1px;background:var(--border);margin:20px 0}
+.l-section-title{font-size:11px;font-weight:500;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:14px}
+.worker-row{display:flex;gap:8px}
+.worker-row input{flex:1}
+.btn-save{padding:11px 15px;background:var(--green-dim);border:1px solid var(--border2);border-radius:var(--radius);color:var(--green);font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;transition:all .2s}
+.btn-save:hover{background:var(--green);color:#080c0b}
+.worker-status{font-size:11px;margin-top:5px;color:var(--text3)}
+.worker-status.ok{color:var(--green)}.worker-status.err{color:var(--danger)}
+.l-hint{margin-top:18px;font-size:11px;color:var(--text3);text-align:center}.l-hint b{color:var(--text2)}
+
+/* APP */
+#app{display:none;flex-direction:column;min-height:100vh}
+nav{display:flex;align-items:center;justify-content:space-between;padding:0 28px;height:56px;border-bottom:1px solid var(--border);background:var(--bg);position:sticky;top:0;z-index:100}
+.nav-l{display:flex;align-items:center;gap:22px}
+.nav-tag{font-size:10px;font-weight:500;letter-spacing:.08em;color:var(--green);text-transform:uppercase;padding:3px 8px;border:1px solid var(--border2);border-radius:100px;background:var(--green-dim)}
+.nav-r{display:flex;align-items:center;gap:13px}
+.nav-user{font-size:12px;color:var(--text2)}
+.btn-out{font-size:11px;color:var(--text3);background:none;border:1px solid var(--border);padding:4px 10px;border-radius:var(--radius);cursor:pointer;transition:all .2s}
+.btn-out:hover{color:var(--text);border-color:var(--border2)}
+
+main{flex:1;max-width:860px;margin:0 auto;width:100%;padding:40px 20px}
+.ph{margin-bottom:36px}
+.eyebrow{font-size:10px;font-weight:500;letter-spacing:.1em;text-transform:uppercase;color:var(--green);margin-bottom:8px}
+.ptitle{font-family:'Syne',sans-serif;font-size:26px;font-weight:700;letter-spacing:-.03em;margin-bottom:8px}
+.pdesc{font-size:13px;color:var(--text2);max-width:520px;line-height:1.75}
+
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;margin-bottom:18px}
+.card-h{padding:16px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:9px}
+.card-icon{width:26px;height:26px;background:var(--green-dim);border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.card-icon svg{width:13px;height:13px;stroke:var(--green)}
+.card-title{font-family:'Syne',sans-serif;font-size:13px;font-weight:600}
+.card-b{padding:22px}
+
+.drop{border:1.5px dashed var(--border2);border-radius:var(--radius);padding:32px 20px;text-align:center;cursor:pointer;transition:all .2s}
+.drop:hover,.drop.over{background:var(--green-dim);border-color:var(--green)}
+.drop svg{width:28px;height:28px;stroke:var(--green);opacity:.5;display:block;margin:0 auto 10px}
+.drop p{font-size:13px;color:var(--text2);margin-bottom:3px}
+.drop small{font-size:11px;color:var(--text3)}
+#fi{display:none}
+.flist{margin-top:14px;display:flex;flex-direction:column;gap:7px}
+.fitem{display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius)}
+.fitem svg{width:16px;height:16px;stroke:var(--green);opacity:.6;flex-shrink:0}
+.fitem-name{flex:1;font-size:12px;font-weight:500}
+.fitem-size{font-size:11px;color:var(--text3)}
+.fitem-rm{cursor:pointer;opacity:.35;transition:opacity .2s}
+.fitem-rm:hover{opacity:1}
+.fitem-rm svg{stroke:var(--danger);opacity:1}
+
+.opts-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.og label{display:block;font-size:10px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--text2);margin-bottom:7px}
+.og select{width:100%;padding:9px 11px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:'Inter',sans-serif;font-size:13px;outline:none;transition:border-color .2s;cursor:pointer}
+.og select:focus{border-color:var(--green)}
+.cb-row{display:flex;align-items:center;gap:8px;margin-top:12px}
+.cb-row input{accent-color:var(--green);cursor:pointer}
+.cb-row span{font-size:12px;color:var(--text2)}
+.ai-toggle{display:flex;align-items:center;gap:12px;padding:13px 15px;background:var(--green-dim);border:1px solid var(--border2);border-radius:var(--radius);margin-top:14px;cursor:pointer;user-select:none}
+.ai-badge{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#080c0b;background:var(--green);padding:2px 6px;border-radius:4px;flex-shrink:0}
+.ai-toggle-txt{flex:1;font-size:12px;color:var(--text2)}
+.ai-toggle-txt b{color:var(--text);font-weight:500}
+.sw{width:34px;height:18px;background:var(--bg3);border-radius:9px;position:relative;flex-shrink:0;border:1px solid var(--border);transition:background .2s}
+.sw.on{background:var(--green)}.knob{width:12px;height:12px;background:var(--text);border-radius:50%;position:absolute;top:2px;left:2px;transition:transform .2s}
+.sw.on .knob{transform:translateX(16px);background:#080c0b}
+
+/* worker warning */
+.worker-warn{display:flex;align-items:flex-start;gap:10px;padding:12px 15px;background:var(--warn-bg);border:1px solid rgba(224,160,82,.2);border-radius:var(--radius);margin-top:12px;font-size:12px;color:var(--warn);line-height:1.6}
+.worker-warn svg{width:15px;height:15px;stroke:var(--warn);flex-shrink:0;margin-top:1px}
+
+.run-btn{width:100%;padding:13px;background:var(--card2);border:1px solid var(--border2);border-radius:var(--radius);color:var(--text);font-family:'Syne',sans-serif;font-size:14px;font-weight:600;cursor:pointer;transition:all .2s;display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:24px}
+.run-btn:not(:disabled):hover{background:var(--green);color:#080c0b;border-color:var(--green)}
+.run-btn:disabled{opacity:.3;cursor:not-allowed}
+.run-btn svg{width:15px;height:15px;stroke:currentColor}
+
+.stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
+.stat{background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px}
+.stat-val{font-family:'Syne',sans-serif;font-size:22px;font-weight:700;letter-spacing:-.03em}
+.stat-val.g{color:var(--green)}.stat-val.r{color:var(--danger)}
+.stat-lbl{font-size:11px;color:var(--text3);margin-top:2px}
+
+.ai-box{background:var(--green-dim);border:1px solid var(--border2);border-radius:var(--radius);padding:16px 18px;margin-bottom:14px}
+.ai-box-h{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.ai-box-title{font-size:13px;font-weight:500}
+.ai-box-txt{font-size:13px;color:var(--text2);line-height:1.75}
+.ai-loading{display:flex;align-items:center;gap:8px;color:var(--text3);font-size:13px}
+.spinner{width:13px;height:13px;border:2px solid var(--border);border-top-color:var(--green);border-radius:50%;animation:spin .7s linear infinite;flex-shrink:0}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.dl-btn{display:inline-flex;align-items:center;gap:7px;padding:10px 18px;background:var(--green);color:#080c0b;border:none;border-radius:var(--radius);font-family:'Syne',sans-serif;font-size:13px;font-weight:700;cursor:pointer;transition:background .2s}
+.dl-btn:hover{background:#5fe08a}
+.dl-btn svg{width:14px;height:14px;stroke:#080c0b}
+
+.processing{text-align:center;padding:48px;color:var(--text3)}
+.proc-spinner{width:32px;height:32px;border:2px solid var(--border);border-top-color:var(--green);border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 16px}
+.processing p{font-size:14px}
+
+footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-items:center;justify-content:space-between}
+.footer-brand{display:flex;align-items:center;gap:8px;opacity:.4}
+.footer-brand-txt{font-family:'Syne',sans-serif;font-size:12px;font-weight:700}
+.footer-copy{font-size:11px;color:var(--text3)}
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="login">
+  <div class="l-bg"></div>
+  <div class="l-grid"></div>
+  <div class="l-box">
+    <div class="logo">
+      <div class="logo-mark">
+        <svg viewBox="0 0 20 20" fill="none" stroke="#080c0b" stroke-width="2.2" stroke-linecap="round">
+          <circle cx="10" cy="10" r="8"/><path d="M10 6v4l3 3"/>
+        </svg>
+      </div>
+      <span class="logo-txt">Origin <span>Health</span></span>
+    </div>
+    <h1>Acesso à plataforma</h1>
+    <p class="sub">Ferramentas de inteligência para pesquisa em saúde</p>
+    <div class="field">
+      <label>E-mail</label>
+      <input type="email" id="email" placeholder="seu@email.com" autocomplete="email">
+    </div>
+    <div class="field">
+      <label>Senha</label>
+      <input type="password" id="pass" placeholder="••••••••" autocomplete="current-password">
+    </div>
+    <button class="btn-primary" id="login-btn" onclick="doLogin()">Entrar</button>
+    <div class="l-err" id="l-err">E-mail ou senha incorretos.</div>
+
+    <div class="l-divider"></div>
+    <div class="l-section-title">Configuração do proxy IA (opcional)</div>
+    <div class="field">
+      <label>URL do Cloudflare Worker</label>
+      <div class="worker-row">
+        <input type="url" id="worker-url" placeholder="https://origin-proxy.seu-usuario.workers.dev/analyze" autocomplete="off">
+        <button class="btn-save" onclick="saveWorkerUrl()">Salvar</button>
+      </div>
+      <div class="hint">Necessário para análise com IA. <a href="https://workers.cloudflare.com" target="_blank" style="color:var(--green)">Criar Worker gratuito →</a></div>
+      <div class="worker-status" id="worker-status">Não configurado — IA ficará desativada</div>
+    </div>
+
+    <p class="l-hint">Demo: <b>demo@origin.com</b> / <b>origin2026</b></p>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app">
+  <nav>
+    <div class="nav-l">
+      <div class="logo" style="margin:0">
+        <div class="logo-mark" style="width:28px;height:28px;border-radius:6px">
+          <svg viewBox="0 0 20 20" fill="none" stroke="#080c0b" stroke-width="2.5" stroke-linecap="round" style="width:14px;height:14px">
+            <circle cx="10" cy="10" r="8"/><path d="M10 6v4l3 3"/>
+          </svg>
+        </div>
+        <span class="logo-txt" style="font-size:15px">Origin <span>Health</span></span>
+      </div>
+      <span class="nav-tag">Data Tools</span>
+    </div>
+    <div class="nav-r">
+      <span class="nav-user" id="nav-user"></span>
+      <button class="btn-out" onclick="doLogout()">Sair</button>
+    </div>
+  </nav>
+
+  <main>
+    <div class="ph">
+      <div class="eyebrow">Ferramenta de dados</div>
+      <div class="ptitle">Deduplicador de Planilhas</div>
+      <p class="pdesc">Carregue arquivos .xlsx, elimine duplicatas por DOI e título, e baixe o arquivo limpo. A IA analisa os resultados automaticamente via proxy seguro.</p>
+    </div>
+
+    <!-- Upload -->
+    <div class="card">
+      <div class="card-h">
+        <div class="card-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round">
+            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+          </svg>
+        </div>
+        <span class="card-title">Importar planilhas</span>
+      </div>
+      <div class="card-b">
+        <div class="drop" id="drop" onclick="document.getElementById('fi').click()">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round">
+            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M12 18v-6M9 15l3-3 3 3"/>
+          </svg>
+          <p>Arraste arquivos aqui ou clique para selecionar</p>
+          <small>Suporta .xlsx e .xls — múltiplos arquivos</small>
+          <input type="file" id="fi" accept=".xlsx,.xls" multiple>
+        </div>
+        <div class="flist" id="flist"></div>
+      </div>
+    </div>
+
+    <!-- Config -->
+    <div class="card" id="cfg-card" style="display:none">
+      <div class="card-h">
+        <div class="card-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round">
+            <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/>
+          </svg>
+        </div>
+        <span class="card-title">Configuração</span>
+      </div>
+      <div class="card-b">
+        <div class="opts-grid">
+          <div class="og">
+            <label>Critério principal</label>
+            <select id="key-col">
+              <option value="auto">Detectar automaticamente (DOI, PMID, ID…)</option>
+              <option value="doi">DOI</option>
+              <option value="title">Título / Titulo</option>
+              <option value="first">Primeira coluna</option>
+            </select>
+          </div>
+          <div class="og">
+            <label>Quando duplicata encontrada</label>
+            <select id="keep-which">
+              <option value="first">Manter primeira ocorrência</option>
+              <option value="last">Manter última ocorrência</option>
+            </select>
+          </div>
+        </div>
+        <div class="cb-row">
+          <input type="checkbox" id="also-title" checked>
+          <span>Também remover duplicatas por título após deduplicar pela chave principal</span>
+        </div>
+        <div class="ai-toggle" onclick="toggleAI()" id="ai-toggle">
+          <span class="ai-badge">IA</span>
+          <span class="ai-toggle-txt"><b>Análise com IA (Gemini)</b> — via Cloudflare Worker</span>
+          <div class="sw on" id="ai-sw"><div class="knob"></div></div>
+        </div>
+        <div class="worker-warn" id="worker-warn" style="display:none">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          <span>Worker não configurado. A IA será desativada automaticamente. Configure a URL na tela de login para habilitar.</span>
+        </div>
+      </div>
+    </div>
+
+    <button class="run-btn" id="run-btn" disabled onclick="runDedup()">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M5 3l14 9-14 9V3z"/></svg>
+      Executar deduplicação
+    </button>
+
+    <div id="results"></div>
+  </main>
+
+  <footer>
+    <div class="footer-brand">
+      <div class="logo-mark" style="width:22px;height:22px;border-radius:5px">
+        <svg viewBox="0 0 20 20" fill="none" stroke="#080c0b" stroke-width="2.5" stroke-linecap="round" style="width:11px;height:11px">
+          <circle cx="10" cy="10" r="8"/><path d="M10 6v4l3 3"/>
+        </svg>
+      </div>
+      <span class="footer-brand-txt">Origin Health</span>
+    </div>
+    <span class="footer-copy">©2026 Origin Health — Data Tools</span>
+  </footer>
+</div>
+
+<script>
+// ── Config ────────────────────────────────────────────────────────────────────
+const USERS = { 'demo@origin.com': 'origin2026', 'admin@originhealth.com.br': 'origin@2026' };
+let currentUser = null, aiEnabled = true, files = [], processedResults = [];
+
+function saveWorkerUrl() {
+  const url = document.getElementById('worker-url').value.trim();
+  const st  = document.getElementById('worker-status');
+  if (!url) { st.textContent = 'Cole a URL antes de salvar.'; st.className = 'worker-status err'; return; }
+  if (!url.startsWith('https://')) { st.textContent = 'URL deve começar com https://'; st.className = 'worker-status err'; return; }
+  localStorage.setItem('worker_url', url);
+  st.textContent = '✓ URL salva — IA habilitada'; st.className = 'worker-status ok';
+}
+
+function loadWorkerUrl() {
+  const saved = localStorage.getItem('worker_url');
+  if (saved) {
+    document.getElementById('worker-url').value = saved;
+    document.getElementById('worker-status').textContent = '✓ URL configurada — IA habilitada';
+    document.getElementById('worker-status').className = 'worker-status ok';
+  }
+  return saved || null;
+}
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+function doLogin() {
+  const email = document.getElementById('email').value.trim();
+  const pass  = document.getElementById('pass').value;
+  const btn   = document.getElementById('login-btn');
+  const err   = document.getElementById('l-err');
+  btn.disabled = true; btn.textContent = 'Verificando…';
+  err.style.display = 'none';
+  setTimeout(() => {
+    if (USERS[email] && USERS[email] === pass) {
+      currentUser = email;
+      const workerUrl = loadWorkerUrl();
+      // Auto-disable AI if no worker configured
+      if (!workerUrl) {
+        aiEnabled = false;
+        document.getElementById('ai-sw').classList.remove('on');
+        document.getElementById('worker-warn').style.display = 'flex';
+      }
+      document.getElementById('login').style.display = 'none';
+      document.getElementById('app').style.display = 'flex';
+      document.getElementById('nav-user').textContent = email;
+    } else {
+      err.style.display = 'block';
+    }
+    btn.disabled = false; btn.textContent = 'Entrar';
+  }, 500);
+}
+
+function doLogout() {
+  currentUser = null; files = []; processedResults = [];
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('login').style.display = 'flex';
+  document.getElementById('email').value = '';
+  document.getElementById('pass').value = '';
+  document.getElementById('results').innerHTML = '';
+  document.getElementById('flist').innerHTML = '';
+  document.getElementById('cfg-card').style.display = 'none';
+  document.getElementById('run-btn').disabled = true;
+}
+
+document.getElementById('pass').addEventListener('keydown', e => { if (e.key==='Enter') doLogin(); });
+document.getElementById('email').addEventListener('keydown', e => { if (e.key==='Enter') document.getElementById('pass').focus(); });
+document.getElementById('worker-url').addEventListener('keydown', e => { if (e.key==='Enter') saveWorkerUrl(); });
+
+// Load saved URL on page open
+loadWorkerUrl();
+
+// ── Files ─────────────────────────────────────────────────────────────────────
+const drop = document.getElementById('drop');
+const fi   = document.getElementById('fi');
+drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); addFiles([...e.dataTransfer.files]); });
+fi.addEventListener('change', () => { addFiles([...fi.files]); fi.value=''; });
+
+function addFiles(nf) {
+  nf.forEach(f => { if (!files.find(x => x.name===f.name && x.size===f.size)) files.push(f); });
+  renderFiles();
+}
+function renderFiles() {
+  const list = document.getElementById('flist');
+  list.innerHTML = '';
+  files.forEach((f, i) => {
+    const d = document.createElement('div'); d.className = 'fitem';
+    d.innerHTML = `
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>
+      <span class="fitem-name">${f.name}</span>
+      <span class="fitem-size">${(f.size/1024).toFixed(0)} KB</span>
+      <div class="fitem-rm" onclick="removeFile(${i})">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </div>`;
+    list.appendChild(d);
+  });
+  document.getElementById('cfg-card').style.display = files.length ? 'block' : 'none';
+  document.getElementById('run-btn').disabled = files.length === 0;
+}
+function removeFile(i) { files.splice(i, 1); renderFiles(); }
+
+// ── AI toggle ─────────────────────────────────────────────────────────────────
+function toggleAI() {
+  const workerUrl = localStorage.getItem('worker_url');
+  if (!aiEnabled && !workerUrl) {
+    document.getElementById('worker-warn').style.display = 'flex'; return;
+  }
+  aiEnabled = !aiEnabled;
+  document.getElementById('ai-sw').classList.toggle('on', aiEnabled);
+  document.getElementById('worker-warn').style.display = (!aiEnabled || workerUrl) ? 'none' : 'flex';
+}
+
+// ── Dedup ─────────────────────────────────────────────────────────────────────
+function detectKeyCol(headers) {
+  const sel = document.getElementById('key-col').value;
+  const n = h => h.toString().trim().toLowerCase().replace(/[^a-z0-9]/g,'');
+  if (sel === 'first') return headers[0];
+  if (sel === 'doi')   return headers.find(h => n(h).includes('doi')) || null;
+  if (sel === 'title') return headers.find(h => n(h).includes('titulo') || n(h).includes('title')) || null;
+  for (const p of ['doi','pmid','id','codigo','code']) {
+    const f = headers.find(h => n(h).includes(p)); if (f) return f;
+  }
+  return headers[0];
+}
+function detectTitleCol(headers) {
+  const n = h => h.toString().trim().toLowerCase().replace(/[^a-z0-9]/g,'');
+  return headers.find(h => n(h).includes('titulo') || n(h).includes('title')) || null;
+}
+function deduplicate(rows, headers) {
+  const keepWhich = document.getElementById('keep-which').value;
+  const alsoTitle = document.getElementById('also-title').checked;
+  const keyCol    = detectKeyCol(headers);
+  const titleCol  = detectTitleCol(headers);
+  const norm = v => v == null ? '' : v.toString().trim().toLowerCase();
+  let data = rows.map((r,i) => ({...r, _i: i}));
+  function removeDups(arr, col) {
+    if (!col) return { kept: arr, removed: 0 };
+    const seen = new Map(), bad = new Set();
+    const work = keepWhich === 'last' ? [...arr].reverse() : arr;
+    work.forEach(row => {
+      const k = norm(row[col]);
+      if (!k || k==='nan' || k==='undefined' || k==='null') return;
+      if (seen.has(k)) bad.add(row._i); else seen.set(k, true);
+    });
+    return { kept: arr.filter(r => !bad.has(r._i)), removed: bad.size };
+  }
+  const r1 = removeDups(data, keyCol);
+  let dupKey = r1.removed; data = r1.kept;
+  let dupTitle = 0;
+  if (alsoTitle && titleCol && titleCol !== keyCol) {
+    const r2 = removeDups(data, titleCol); dupTitle = r2.removed; data = r2.kept;
+  }
+  const clean = data.map(r => { const x={...r}; delete x._i; return x; });
+  return { clean, dupKey, dupTitle, keyCol, titleCol };
+}
+
+// ── AI via Cloudflare Worker ──────────────────────────────────────────────────
+async function getAIAnalysis(pr) {
+  const workerUrl = localStorage.getItem('worker_url');
+  if (!workerUrl) throw new Error('Worker não configurado.');
+  const summary = pr.results.map(r => ({
+    arquivo: pr.file.name, planilha: r.sheetName,
+    total_original: r.original,
+    duplicatas_removidas: r.dupKey + r.dupTitle,
+    registros_finais: r.clean.length,
+    criterio_principal: r.keyCol || 'auto'
+  }));
+  const resp = await fetch(workerUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ summary })
+  });
+  const data = await resp.json();
+  if (data.error) throw new Error(data.error);
+  return data.text;
+}
+
+// ── Download Excel ────────────────────────────────────────────────────────────
+function downloadExcel(idx) {
+  const pr = processedResults[idx];
+  if (!pr) return;
+  const wb = XLSX.utils.book_new();
+  pr.results.forEach(r => {
+    const rows = r.clean.map((row, i) => {
+      const keys = Object.keys(row);
+      const fk = keys[0];
+      if (fk && !isNaN(Number(row[fk]))) return { ...row, [fk]: i + 1 };
+      return row;
+    });
+    const ws = XLSX.utils.json_to_sheet(rows, { header: r.headers });
+    ws['!cols'] = r.headers.map(h => ({ wch: Math.min(Math.max(h.length + 4, 12), 60) }));
+    XLSX.utils.book_append_sheet(wb, ws, r.sheetName.substring(0, 31));
+  });
+  XLSX.writeFile(wb, pr.file.name.replace(/\.xlsx?$/i,'') + '_sem_duplicatas.xlsx');
+}
+
+// ── Run ───────────────────────────────────────────────────────────────────────
+async function runDedup() {
+  const area = document.getElementById('results');
+  area.innerHTML = `<div class="processing"><div class="proc-spinner"></div><p>Processando planilhas…</p></div>`;
+  document.getElementById('run-btn').disabled = true;
+  processedResults = [];
+
+  try {
+    const processed = await Promise.all(files.map(f => new Promise((res, rej) => {
+      const reader = new FileReader();
+      reader.onload = e => {
+        try {
+          const wb = XLSX.read(e.target.result, { type: 'array' });
+          const results = wb.SheetNames.map(sheetName => {
+            const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval: '' });
+            if (!rows.length) return null;
+            const headers = Object.keys(rows[0]);
+            const { clean, dupKey, dupTitle, keyCol, titleCol } = deduplicate(rows, headers);
+            return { sheetName, original: rows.length, clean, dupKey, dupTitle, keyCol, titleCol, headers };
+          }).filter(Boolean);
+          res({ file: f, results });
+        } catch(err) { rej(err); }
+      };
+      reader.onerror = rej;
+      reader.readAsArrayBuffer(f);
+    })));
+
+    processedResults = processed;
+    area.innerHTML = '';
+    processed.forEach((pr, idx) => area.appendChild(buildBlock(pr, idx)));
+
+    if (aiEnabled && localStorage.getItem('worker_url')) {
+      const boxes = area.querySelectorAll('.ai-box');
+      for (let i = 0; i < boxes.length; i++) {
+        try {
+          const text = await getAIAnalysis(processed[i]);
+          boxes[i].querySelector('.ai-box-txt').innerHTML = text.replace(/\n\n/g,'<br><br>').replace(/\n/g,'<br>');
+        } catch(e) {
+          boxes[i].querySelector('.ai-box-txt').innerHTML = `<span style="color:var(--danger)">IA indisponível: ${e.message}</span>`;
+        }
+      }
+    }
+  } catch(err) {
+    area.innerHTML = `<div class="card"><div class="card-b" style="color:var(--danger);padding:22px">Erro: ${err.message}</div></div>`;
+  }
+  document.getElementById('run-btn').disabled = false;
+}
+
+function buildBlock(pr, idx) {
+  const { file, results } = pr;
+  const tOrig   = results.reduce((a,r) => a+r.original, 0);
+  const tDupKey = results.reduce((a,r) => a+r.dupKey, 0);
+  const tDupTit = results.reduce((a,r) => a+r.dupTitle, 0);
+  const tKept   = tOrig - tDupKey - tDupTit;
+  const pct     = tOrig ? Math.round((tDupKey+tDupTit)/tOrig*100) : 0;
+  const wrap    = document.createElement('div');
+  wrap.className = 'card';
+  wrap.style.marginBottom = '18px';
+  wrap.innerHTML = `
+    <div class="card-h">
+      <div class="card-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>
+      </div>
+      <span class="card-title">${file.name}</span>
+    </div>
+    <div class="card-b">
+      <div class="stats-grid">
+        <div class="stat"><div class="stat-val">${tOrig}</div><div class="stat-lbl">Originais</div></div>
+        <div class="stat"><div class="stat-val r">−${tDupKey}</div><div class="stat-lbl">Dup. por ${results[0]?.keyCol||'chave'}</div></div>
+        <div class="stat"><div class="stat-val r">−${tDupTit}</div><div class="stat-lbl">Dup. por título</div></div>
+        <div class="stat"><div class="stat-val g">${tKept}</div><div class="stat-lbl">Mantidos (−${pct}%)</div></div>
+      </div>
+      ${aiEnabled && localStorage.getItem('worker_url') ? `
+      <div class="ai-box">
+        <div class="ai-box-h"><span class="ai-badge">IA</span><span class="ai-box-title">Análise automática — Gemini</span></div>
+        <div class="ai-box-txt"><div class="ai-loading"><div class="spinner"></div>Gerando análise…</div></div>
+      </div>` : ''}
+      <button class="dl-btn" onclick="downloadExcel(${idx})">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+        Baixar Excel sem duplicatas
+      </button>
+    </div>`;
+  return wrap;
+}
+</script>
+</body>
+</html>
