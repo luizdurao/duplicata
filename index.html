@@ -463,11 +463,15 @@ function detectKeyCol(headers) {
   return headers[0];
 }
 function detectTitleCol(headers) {
-  const n = h => h.toString().trim().toLowerCase().replace(/[^a-z0-9]/g,'');
+  const n = h => h.toString().trim().toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')  // strip accents
+    .replace(/[^a-z0-9]/g,'');
   return headers.find(h => n(h).includes('titulo') || n(h).includes('title')) || null;
 }
 function detectResumoCol(headers) {
-  const n = h => h.toString().trim().toLowerCase().replace(/[^a-z0-9]/g,'');
+  const n = h => h.toString().trim().toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/[^a-z0-9]/g,'');
   return headers.find(h => n(h).includes('resumo') || n(h).includes('abstract') || n(h).includes('summary')) || null;
 }
 function deduplicate(rows, headers) {
@@ -552,7 +556,11 @@ async function getAIAnalysis(pr) {
 }
 
 async function getFuzzyDuplicates(pr) {
-  const titleCol = pr.results[0]?.titleCol;
+  // titleCol may be null if accent detection failed — fallback to column index 3 (common position)
+  let titleCol = pr.results[0]?.titleCol;
+  if (!titleCol && pr.results[0]?.headers?.length >= 4) {
+    titleCol = pr.results[0].headers[3]; // 4th column is usually title
+  }
   if (!titleCol) throw new Error('Coluna de título não detectada.');
   // Send max 150 titles to keep prompt small and fast
   const titles = pr.results.flatMap(r => r.clean.map(row => row[titleCol] || ''))
@@ -671,16 +679,12 @@ async function runDedup() {
     const wurl = localStorage.getItem('worker_url'); if (aiEnabled && wurl) {
       const boxes = area.querySelectorAll('.ai-box');
       await Promise.all(processed.map(async (pr, i) => {
-        const sBox = boxes[i];
         const fBox = area.querySelector('#fuzzy-' + i);
-        await Promise.all([
-          getAIAnalysis(pr)
-            .then(t => { if(sBox) sBox.querySelector('.ai-box-txt').innerHTML = t.replace(/\n\n/g,'<br><br>').replace(/\n/g,'<br>'); })
-            .catch(e => { if(sBox) sBox.querySelector('.ai-box-txt').innerHTML = '<span style="color:var(--danger)">IA indisponível: '+e.message+'</span>'; }),
-          fBox
-            ? getFuzzyDuplicates(pr).then(f => renderFuzzyResults(fBox, f, pr, i)).catch(e => { fBox.innerHTML = '<div class="fuzzy-box-h"><span class="fuzzy-badge">IA Fuzzy</span></div><span style="color:var(--text3);font-size:12px">Fuzzy indisponível: '+e.message+'</span>'; })
-            : Promise.resolve()
-        ]);
+        if (fBox) {
+          await getFuzzyDuplicates(pr)
+            .then(f => renderFuzzyResults(fBox, f, pr, i))
+            .catch(e => { fBox.innerHTML = '<div class="fuzzy-box-h"><span class="fuzzy-badge">IA Fuzzy</span></div><span style="color:var(--text3);font-size:12px">Fuzzy indisponível: '+e.message+'</span>'; });
+        }
       }));
     }
   } catch(err) {
@@ -716,16 +720,12 @@ function buildBlock(pr, idx) {
         <div class="stat"><div class="stat-val g">${tKept}</div><div class="stat-lbl">Mantidos (−${pct}%)</div></div>
       </div>
       ${aiEnabled && localStorage.getItem('worker_url') ? `
-      <div class="ai-box">
-        <div class="ai-box-h"><span class="ai-badge">IA</span><span class="ai-box-title">Análise automática — Gemini</span></div>
-        <div class="ai-box-txt"><div class="ai-loading"><div class="spinner"></div>Gerando análise…</div></div>
-      </div>
       <div class="fuzzy-box" id="fuzzy-${idx}">
         <div class="fuzzy-box-h">
           <span class="fuzzy-badge">IA Fuzzy</span>
-          <span class="ai-box-title">Buscando duplicatas não detectadas automaticamente…</span>
+          <span class="ai-box-title">Buscando duplicatas adicionais com IA…</span>
         </div>
-        <div class="fuzzy-loading"><div class="spinner"></div>Analisando títulos com IA…</div>
+        <div class="ai-loading"><div class="spinner"></div>Analisando títulos…</div>
       </div>` : ''}
       <button class="dl-btn" onclick="downloadExcel(${idx})">
         <svg viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
