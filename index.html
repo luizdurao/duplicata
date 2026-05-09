@@ -584,7 +584,7 @@ async function runDedup() {
             const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval: '' });
             if (!rows.length) return null;
             const headers = Object.keys(rows[0]);
-            const { clean, dupKey, dupTitle, keyCol, titleCol } = deduplicate(rows, headers);
+            const { clean, dupKey, dupTitle, dupResumo, keyCol, titleCol, resumoCol } = deduplicate(rows, headers);
             return { sheetName, original: rows.length, clean, dupKey, dupTitle, dupResumo, keyCol, titleCol, resumoCol, headers };
           }).filter(Boolean);
           res({ file: f, results });
