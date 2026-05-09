@@ -172,12 +172,15 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
     <div class="l-divider"></div>
     <div class="l-section-title">Configuração do proxy IA (opcional)</div>
     <div class="field">
-      <label>URL do Cloudflare Worker</label>
+      <label>URL do Google Apps Script (proxy IA)</label>
       <div class="worker-row">
-        <input type="url" id="worker-url" placeholder="https://origin-proxy.seu-usuario.workers.dev/analyze" autocomplete="off">
+        <input type="url" id="worker-url" placeholder="https://script.google.com/macros/s/SEU_ID/exec" autocomplete="off">
         <button class="btn-save" onclick="saveWorkerUrl()">Salvar</button>
       </div>
-      <div class="hint">Necessário para análise com IA. <a href="https://workers.cloudflare.com" target="_blank" style="color:var(--green)">Criar Worker gratuito →</a></div>
+      <div class="hint">Cole a URL do Google Apps Script. <a href="https://script.google.com" target="_blank" style="color:var(--green)">Criar script gratuito →</a></div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn-save" style="font-size:11px;padding:6px 12px" onclick="testWorker()">Testar conexão</button>
+      </div>
       <div class="worker-status" id="worker-status">Não configurado — IA ficará desativada</div>
     </div>
 
@@ -270,7 +273,7 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
         </div>
         <div class="ai-toggle" onclick="toggleAI()" id="ai-toggle">
           <span class="ai-badge">IA</span>
-          <span class="ai-toggle-txt"><b>Análise com IA (Gemini)</b> — via Cloudflare Worker</span>
+          <span class="ai-toggle-txt"><b>Análise com IA (Gemini)</b> — via Google Apps Script</span>
           <div class="sw on" id="ai-sw"><div class="knob"></div></div>
         </div>
         <div class="worker-warn" id="worker-warn" style="display:none">
@@ -306,13 +309,46 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
 const USERS = { 'demo@origin.com': 'origin2026', 'admin@originhealth.com.br': 'origin@2026' };
 let currentUser = null, aiEnabled = true, files = [], processedResults = [];
 
+function normalizeWorkerUrl(raw) {
+  // Keep URL as-is, just trim whitespace and trailing slash
+  return raw.trim().replace(/\/$/, '');
+}
+
 function saveWorkerUrl() {
-  const url = document.getElementById('worker-url').value.trim();
+  const raw = document.getElementById('worker-url').value.trim();
   const st  = document.getElementById('worker-status');
-  if (!url) { st.textContent = 'Cole a URL antes de salvar.'; st.className = 'worker-status err'; return; }
-  if (!url.startsWith('https://')) { st.textContent = 'URL deve começar com https://'; st.className = 'worker-status err'; return; }
+  if (!raw) { st.textContent = 'Cole a URL antes de salvar.'; st.className = 'worker-status err'; return; }
+  if (!raw.startsWith('https://')) { st.textContent = 'URL deve começar com https://'; st.className = 'worker-status err'; return; }
+  const url = normalizeWorkerUrl(raw);
+  document.getElementById('worker-url').value = url;
   localStorage.setItem('worker_url', url);
-  st.textContent = '✓ URL salva — IA habilitada'; st.className = 'worker-status ok';
+  st.textContent = '✓ URL salva — clique em Testar conexão para verificar'; st.className = 'worker-status ok';
+}
+
+async function testWorker() {
+  const raw = document.getElementById('worker-url').value.trim();
+  const st  = document.getElementById('worker-status');
+  if (!raw) { st.textContent = 'Cole a URL primeiro.'; st.className = 'worker-status err'; return; }
+  const url = normalizeWorkerUrl(raw);
+  st.textContent = '⏳ Testando conexão…'; st.className = 'worker-status';
+  try {
+    const resp = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(8000) });
+    const data = await resp.json();
+    if (data.ok) {
+      st.textContent = '✓ Worker online e respondendo — IA pronta!'; st.className = 'worker-status ok';
+      localStorage.setItem('worker_url', url);
+    } else {
+      st.textContent = 'Worker respondeu mas retornou erro: ' + JSON.stringify(data); st.className = 'worker-status err';
+    }
+  } catch(e) {
+    if (e.name === 'TimeoutError') {
+      st.textContent = '✗ Timeout — Worker não respondeu em 8s. Verifique se foi deployado.'; st.className = 'worker-status err';
+    } else if (e.message.includes('fetch')) {
+      st.textContent = '✗ Failed to fetch — verifique se ALLOWED_ORIGIN inclui este domínio no Worker.'; st.className = 'worker-status err';
+    } else {
+      st.textContent = '✗ Erro: ' + e.message; st.className = 'worker-status err';
+    }
+  }
 }
 
 function loadWorkerUrl() {
@@ -458,10 +494,10 @@ function deduplicate(rows, headers) {
   return { clean, dupKey, dupTitle, keyCol, titleCol };
 }
 
-// ── AI via Cloudflare Worker ──────────────────────────────────────────────────
+// ── AI via Google Apps Script ─────────────────────────────────────────────────
 async function getAIAnalysis(pr) {
-  const workerUrl = localStorage.getItem('worker_url');
-  if (!workerUrl) throw new Error('Worker não configurado.');
+  const scriptUrl = localStorage.getItem('worker_url');
+  if (!scriptUrl) throw new Error('URL do Apps Script não configurada.');
   const summary = pr.results.map(r => ({
     arquivo: pr.file.name, planilha: r.sheetName,
     total_original: r.original,
@@ -469,14 +505,24 @@ async function getAIAnalysis(pr) {
     registros_finais: r.clean.length,
     criterio_principal: r.keyCol || 'auto'
   }));
-  const resp = await fetch(workerUrl, {
+  // Apps Script requires GET with params or POST — we use POST via no-cors workaround
+  // Apps Script doPost supports application/x-www-form-urlencoded
+  const params = new URLSearchParams({ data: JSON.stringify({ summary }) });
+  const resp = await fetch(scriptUrl, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ summary })
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: params.toString(),
+    redirect: 'follow'
   });
-  const data = await resp.json();
-  if (data.error) throw new Error(data.error);
-  return data.text;
+  const text = await resp.text();
+  try {
+    const data = JSON.parse(text);
+    if (data.error) throw new Error(data.error);
+    return data.text;
+  } catch {
+    if (text && text.length > 10) return text;
+    throw new Error('Resposta inválida do Apps Script: ' + text.substring(0, 100));
+  }
 }
 
 // ── Download Excel ────────────────────────────────────────────────────────────
@@ -529,7 +575,7 @@ async function runDedup() {
     area.innerHTML = '';
     processed.forEach((pr, idx) => area.appendChild(buildBlock(pr, idx)));
 
-    if (aiEnabled && localStorage.getItem('worker_url')) {
+    const wurl = localStorage.getItem('worker_url'); if (aiEnabled && wurl) {
       const boxes = area.querySelectorAll('.ai-box');
       for (let i = 0; i < boxes.length; i++) {
         try {
