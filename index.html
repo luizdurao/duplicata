@@ -557,34 +557,36 @@ function deduplicate(rows, headers) {
     }
   }
 
+  // Track removed rows with reason during dedup passes
+  function removeDupsTracked(arr, col, useShort, reason) {
+    if (!col) return { kept: arr, removed: 0, removedRows: [] };
+    const seen = new Map(), bad = new Set(), removedRows = [];
+    const work = keepWhich === 'last' ? [...arr].reverse() : arr;
+    work.forEach(row => {
+      const k = useShort ? normResumo(row[col]) : norm(row[col]);
+      if (!k || k==='nan' || k==='undefined' || k==='null' || k.length < 3) return;
+      if (seen.has(k)) { bad.add(row._i); removedRows.push({ row, reason }); }
+      else seen.set(k, true);
+    });
+    return { kept: arr.filter(r => !bad.has(r._i)), removed: bad.size, removedRows };
+  }
+
+  // Re-run with tracking (results same as before but now we capture removed rows)
+  let tracked = rows.map((r,i) => ({...r, _i: i}));
+  const t1 = removeDupsTracked(tracked, keyCol, false, 'DOI/ID duplicado');
+  tracked = t1.kept;
+  const t2 = (alsoTitle && titleCol && titleCol !== keyCol)
+    ? removeDupsTracked(tracked, titleCol, false, 'Título duplicado')
+    : { kept: tracked, removed: 0, removedRows: [] };
+  tracked = t2.kept;
+  const t3 = (alsoTitle && resumoCol && resumoCol !== keyCol && resumoCol !== titleCol)
+    ? removeDupsTracked(tracked, resumoCol, true, 'Resumo duplicado')
+    : { kept: tracked, removed: 0, removedRows: [] };
+
+  const removedRows = [...t1.removedRows, ...t2.removedRows, ...t3.removedRows]
+    .map(item => { const r = {...item.row}; delete r._i; return { row: r, reason: item.reason }; });
+
   const clean = data.map(r => { const x={...r}; delete x._i; return x; });
-
-  // Collect removed rows with reason for the report
-  const cleanIds = new Set(data.map(r => r._i));
-  // We need to track which rows were removed and why — re-run tagging pass
-  const removedRows = [];
-  const seenKey = new Map(), seenTitle = new Map(), seenResumo = new Map();
-  const allOrig = rows.map((r,i) => ({...r, _i: i}));
-  allOrig.forEach(row => {
-    const kv = keyCol ? norm(row[keyCol]) : '';
-    const tv = titleCol ? norm(row[titleCol]) : '';
-    const rv = resumoCol ? normResumo(row[resumoCol]) : '';
-    let reason = null;
-    if (kv && kv!=='nan' && kv!=='undefined' && kv!=='null' && kv.length>=3) {
-      if (seenKey.has(kv)) reason = 'DOI/ID duplicado';
-      else seenKey.set(kv, row._i);
-    }
-    if (!reason && tv && tv.length>=3) {
-      if (seenTitle.has(tv)) reason = 'Título duplicado';
-      else seenTitle.set(tv, row._i);
-    }
-    if (!reason && rv && rv.length>=10) {
-      if (seenResumo.has(rv)) reason = 'Resumo duplicado';
-      else seenResumo.set(rv, row._i);
-    }
-    if (reason) removedRows.push({ row, reason });
-  });
-
   return { clean, dupKey, dupTitle, dupResumo, keyCol, titleCol, resumoCol, removedRows };
 }
 
