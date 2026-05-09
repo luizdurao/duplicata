@@ -140,6 +140,26 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
 .footer-brand-txt{font-family:'Syne',sans-serif;font-size:12px;font-weight:700}
 .footer-copy{font-size:11px;color:var(--text3)}
 
+
+/* ── REMOVED LIST ── */
+.removed-section{margin-bottom:14px}
+.removed-toggle{display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;font-size:12px;color:var(--text2);transition:all .2s;user-select:none}
+.removed-toggle:hover{border-color:var(--border2);color:var(--text)}
+.removed-toggle-arrow{margin-left:auto;font-size:10px;transition:transform .2s}
+.removed-toggle.open .removed-toggle-arrow{transform:rotate(180deg)}
+.removed-list{display:none;margin-top:8px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.removed-list.open{display:block}
+.removed-table{width:100%;border-collapse:collapse;font-size:12px}
+.removed-table th{text-align:left;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--text3);padding:6px 10px;border-bottom:1px solid var(--border);background:var(--bg3);position:sticky;top:0}
+.removed-table td{padding:7px 10px;border-bottom:1px solid var(--border);vertical-align:top;line-height:1.5;color:var(--text2)}
+.removed-table tr:last-child td{border-bottom:none}
+.removed-table tr:hover td{background:rgba(74,207,120,.03)}
+.removed-reason{display:inline-block;font-size:10px;font-weight:600;padding:2px 6px;border-radius:4px;white-space:nowrap}
+.removed-reason.doi{background:rgba(224,82,82,.12);color:#e05252}
+.removed-reason.titulo{background:rgba(224,160,82,.12);color:#e0a052}
+.removed-reason.resumo{background:rgba(74,207,120,.12);color:#4acf78}
+.removed-table-wrap{max-height:320px;overflow-y:auto}
+
 /* ── FUZZY ── */
 .fuzzy-box{background:var(--bg3);border:1px solid var(--border2);border-radius:var(--radius);padding:16px 18px;margin-bottom:14px}
 .fuzzy-box-h{display:flex;align-items:center;gap:8px;margin-bottom:12px}
@@ -538,7 +558,34 @@ function deduplicate(rows, headers) {
   }
 
   const clean = data.map(r => { const x={...r}; delete x._i; return x; });
-  return { clean, dupKey, dupTitle, dupResumo, keyCol, titleCol, resumoCol };
+
+  // Collect removed rows with reason for the report
+  const cleanIds = new Set(data.map(r => r._i));
+  // We need to track which rows were removed and why — re-run tagging pass
+  const removedRows = [];
+  const seenKey = new Map(), seenTitle = new Map(), seenResumo = new Map();
+  const allOrig = rows.map((r,i) => ({...r, _i: i}));
+  allOrig.forEach(row => {
+    const kv = keyCol ? norm(row[keyCol]) : '';
+    const tv = titleCol ? norm(row[titleCol]) : '';
+    const rv = resumoCol ? normResumo(row[resumoCol]) : '';
+    let reason = null;
+    if (kv && kv!=='nan' && kv!=='undefined' && kv!=='null' && kv.length>=3) {
+      if (seenKey.has(kv)) reason = 'DOI/ID duplicado';
+      else seenKey.set(kv, row._i);
+    }
+    if (!reason && tv && tv.length>=3) {
+      if (seenTitle.has(tv)) reason = 'Título duplicado';
+      else seenTitle.set(tv, row._i);
+    }
+    if (!reason && rv && rv.length>=10) {
+      if (seenResumo.has(rv)) reason = 'Resumo duplicado';
+      else seenResumo.set(rv, row._i);
+    }
+    if (reason) removedRows.push({ row, reason });
+  });
+
+  return { clean, dupKey, dupTitle, dupResumo, keyCol, titleCol, resumoCol, removedRows };
 }
 
 // ── AI via Google Apps Script ─────────────────────────────────────────────────
@@ -576,18 +623,58 @@ async function getAIAnalysis(pr) {
 }
 
 async function getFuzzyDuplicates(pr) {
-  // titleCol may be null if accent detection failed — fallback to column index 3 (common position)
   let titleCol = pr.results[0]?.titleCol;
-  if (!titleCol && pr.results[0]?.headers?.length >= 4) {
-    titleCol = pr.results[0].headers[3]; // 4th column is usually title
-  }
+  if (!titleCol && pr.results[0]?.headers?.length >= 4) titleCol = pr.results[0].headers[3];
   if (!titleCol) throw new Error('Coluna de título não detectada.');
-  // Send max 150 titles to keep prompt small and fast
-  const titles = pr.results.flatMap(r => r.clean.map(row => row[titleCol] || ''))
-    .filter(t => t.trim()).slice(0, 150);
-  if (titles.length < 2) throw new Error('Poucos títulos para análise.');
+
+  // Build flat list with original row index preserved
+  const allRows = pr.results.flatMap(r => r.clean);
+  const indexed = allRows
+    .map((row, i) => ({ i, t: titleCol ? (row[titleCol] || '') : (Object.values(row)[3] || '') }))
+    .filter(x => x.t.trim())
+    .slice(0, 150);
+
+  if (indexed.length < 2) throw new Error('Poucos títulos para análise.');
+
+  // Store mapping: position in sent list → original allRows index
+  pr._fuzzyMap = indexed.map(x => x.i);
+
+  const titles = indexed.map(x => x.t);
   const data = await callScript({ mode: 'fuzzy', titles });
   return data.fuzzy;
+}
+
+// ── Render removed rows list ─────────────────────────────────────────────────
+function renderRemovedList(pr, idx) {
+  const allRemoved = pr.results.flatMap(r => r.removedRows || []);
+  if (!allRemoved.length) return '';
+  const titleCol = getTitleCol(pr);
+  const keyCol   = pr.results[0]?.keyCol || '';
+  const rows = allRemoved.map(function(item) {
+    const row = item.row, reason = item.reason;
+    const title = titleCol ? (row[titleCol] || '—') : '—';
+    const key   = keyCol   ? (row[keyCol]   || '—') : '—';
+    const cls   = reason.includes('DOI') ? 'doi' : reason.includes('Título') ? 'titulo' : 'resumo';
+    return '<tr><td>' + title + '</td><td style="color:var(--text3);font-size:11px">' + key + '</td><td><span class="removed-reason ' + cls + '">' + reason + '</span></td></tr>';
+  }).join('');
+  return '<div class="removed-section">' +
+    '<div class="removed-toggle" id="rt-' + idx + '" onclick="toggleRemoved(' + idx + ')">' +
+      '<span>📋 ' + allRemoved.length + ' registro' + (allRemoved.length !== 1 ? 's' : '') + ' removido' + (allRemoved.length !== 1 ? 's' : '') + ' — ver lista completa</span>' +
+      '<span class="removed-toggle-arrow">▼</span>' +
+    '</div>' +
+    '<div class="removed-list" id="rl-' + idx + '">' +
+      '<div class="removed-table-wrap"><table class="removed-table">' +
+        '<thead><tr><th>Título</th><th>DOI / ID</th><th>Motivo</th></tr></thead>' +
+        '<tbody>' + rows + '</tbody>' +
+      '</table></div>' +
+    '</div>' +
+  '</div>';
+}
+function toggleRemoved(idx) {
+  var t = document.getElementById('rt-' + idx);
+  var l = document.getElementById('rl-' + idx);
+  if (t) t.classList.toggle('open');
+  if (l) l.classList.toggle('open');
 }
 
 // ── Render fuzzy results ─────────────────────────────────────────────────────
@@ -618,11 +705,15 @@ function renderFuzzyResults(box, fuzzy, pr, idx) {
       ' duplicata' + (n !== 1 ? 's' : '') + ' adicional' + (n !== 1 ? 'is' : '') + ' — revise e remova</span>' +
     '</div>';
 
+  // Map AI's list-indices back to real allRows indices
+  const fuzzyMap = pr._fuzzyMap || null;
+
   duplicatas.forEach((dup, di) => {
-    const rows_html = dup.indices.map(ri => {
-      const row = allRows[ri];
-      const title = row ? (titleCol ? (row[titleCol] || '—') : (Object.values(row)[3] || '—')) : '(índice inválido)';
-      return '<tr><td class="fuzzy-idx">' + ri + '</td><td class="fuzzy-title-cell">' + title + '</td></tr>';
+    const rows_html = dup.indices.map(listIdx => {
+      const realIdx = fuzzyMap ? (fuzzyMap[listIdx] ?? listIdx) : listIdx;
+      const row = allRows[realIdx];
+      const title = row ? (titleCol ? (row[titleCol] || '—') : (Object.values(row)[3] || '—')) : '(índice ' + listIdx + ' inválido)';
+      return '<tr><td class="fuzzy-idx">' + (realIdx + 1) + '</td><td class="fuzzy-title-cell">' + title + '</td></tr>';
     }).join('');
 
     html +=
@@ -642,24 +733,26 @@ function renderFuzzyResults(box, fuzzy, pr, idx) {
   box.innerHTML = html;
 }
 
-function removeFuzzyDup(prIdx, indices, itemIdx) {
+function removeFuzzyDup(prIdx, listIndices, itemIdx) {
   const pr = processedResults[prIdx];
   if (!pr) return;
-  // Remove all but the first index from each sheet's clean array
-  const allRows = pr.results.flatMap(r => r.clean);
-  const toRemove = new Set(indices.slice(1)); // keep first, remove rest
+  // Map list indices → real row indices
+  const fuzzyMap = pr._fuzzyMap || null;
+  const realIndices = listIndices.map(li => fuzzyMap ? (fuzzyMap[li] ?? li) : li);
+  const toRemove = new Set(realIndices.slice(1)); // keep first, remove rest
   let offset = 0;
   pr.results.forEach(r => {
     const len = r.clean.length;
     r.clean = r.clean.filter((_, i) => !toRemove.has(offset + i));
     offset += len;
   });
-  // Mark button as removed
-  const btn = document.querySelector(`#fuzzy-item-${prIdx}-${itemIdx} .fuzzy-rm-btn`);
+  const btn = document.querySelector('#fuzzy-item-' + prIdx + '-' + itemIdx + ' .fuzzy-rm-btn');
   if (btn) { btn.textContent = '✓ Removida'; btn.className = 'fuzzy-rm-btn removed'; btn.disabled = true; }
-  // Update stats display
-  const statKept = document.querySelectorAll(`#results .card`)[prIdx]?.querySelectorAll('.stat-val.g')[0];
-  if (statKept) statKept.textContent = pr.results.reduce((a,r) => a+r.clean.length, 0);
+  const cards = document.querySelectorAll('#results .card');
+  if (cards[prIdx]) {
+    const kept = cards[prIdx].querySelectorAll('.stat-val.g')[0];
+    if (kept) kept.textContent = pr.results.reduce((a,r) => a+r.clean.length, 0);
+  }
 }
 
 // ── Download Excel ────────────────────────────────────────────────────────────
@@ -699,7 +792,7 @@ async function runDedup() {
             if (!rows.length) return null;
             const headers = Object.keys(rows[0]);
             const { clean, dupKey, dupTitle, dupResumo, keyCol, titleCol, resumoCol } = deduplicate(rows, headers);
-            return { sheetName, original: rows.length, clean, dupKey, dupTitle, dupResumo, keyCol, titleCol, resumoCol, headers };
+            return { sheetName, original: rows.length, clean, dupKey, dupTitle, dupResumo, keyCol, titleCol, resumoCol, headers, removedRows };
           }).filter(Boolean);
           res({ file: f, results });
         } catch(err) { rej(err); }
@@ -763,6 +856,7 @@ function buildBlock(pr, idx) {
         </div>
         <div class="ai-loading"><div class="spinner"></div>Analisando títulos…</div>
       </div>` : ''}
+      ${renderRemovedList(pr, idx)}
       <button class="dl-btn" onclick="downloadExcel(${idx})">
         <svg viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
         Baixar Excel sem duplicatas
