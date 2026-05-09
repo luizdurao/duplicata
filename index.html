@@ -269,7 +269,7 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
         </div>
         <div class="cb-row">
           <input type="checkbox" id="also-title" checked>
-          <span>Também remover duplicatas por título após deduplicar pela chave principal</span>
+          <span>Também deduplicar por título e resumo (útil quando DOI está ausente)</span>
         </div>
         <div class="ai-toggle" onclick="toggleAI()" id="ai-toggle">
           <span class="ai-badge">IA</span>
@@ -466,32 +466,55 @@ function detectTitleCol(headers) {
   const n = h => h.toString().trim().toLowerCase().replace(/[^a-z0-9]/g,'');
   return headers.find(h => n(h).includes('titulo') || n(h).includes('title')) || null;
 }
+function detectResumoCol(headers) {
+  const n = h => h.toString().trim().toLowerCase().replace(/[^a-z0-9]/g,'');
+  return headers.find(h => n(h).includes('resumo') || n(h).includes('abstract') || n(h).includes('summary')) || null;
+}
 function deduplicate(rows, headers) {
-  const keepWhich = document.getElementById('keep-which').value;
-  const alsoTitle = document.getElementById('also-title').checked;
-  const keyCol    = detectKeyCol(headers);
-  const titleCol  = detectTitleCol(headers);
+  const keepWhich  = document.getElementById('keep-which').value;
+  const alsoTitle  = document.getElementById('also-title').checked;
+  const keyCol     = detectKeyCol(headers);
+  const titleCol   = detectTitleCol(headers);
+  const resumoCol  = detectResumoCol(headers);
+
+  // Build a short fingerprint of resumo (first 120 chars) to avoid false positives
   const norm = v => v == null ? '' : v.toString().trim().toLowerCase();
+  const normResumo = v => norm(v).replace(/\s+/g,' ').substring(0, 120);
+
   let data = rows.map((r,i) => ({...r, _i: i}));
-  function removeDups(arr, col) {
+
+  function removeDups(arr, col, useShort) {
     if (!col) return { kept: arr, removed: 0 };
     const seen = new Map(), bad = new Set();
     const work = keepWhich === 'last' ? [...arr].reverse() : arr;
     work.forEach(row => {
-      const k = norm(row[col]);
-      if (!k || k==='nan' || k==='undefined' || k==='null') return;
+      const k = useShort ? normResumo(row[col]) : norm(row[col]);
+      if (!k || k==='nan' || k==='undefined' || k==='null' || k.length < 3) return;
       if (seen.has(k)) bad.add(row._i); else seen.set(k, true);
     });
     return { kept: arr.filter(r => !bad.has(r._i)), removed: bad.size };
   }
-  const r1 = removeDups(data, keyCol);
+
+  // Step 1: deduplicate by primary key (DOI/PMID/etc)
+  const r1 = removeDups(data, keyCol, false);
   let dupKey = r1.removed; data = r1.kept;
-  let dupTitle = 0;
-  if (alsoTitle && titleCol && titleCol !== keyCol) {
-    const r2 = removeDups(data, titleCol); dupTitle = r2.removed; data = r2.kept;
+
+  let dupTitle = 0, dupResumo = 0;
+  if (alsoTitle) {
+    // Step 2: deduplicate by title (only rows without valid key OR with same title)
+    if (titleCol && titleCol !== keyCol) {
+      const r2 = removeDups(data, titleCol, false);
+      dupTitle = r2.removed; data = r2.kept;
+    }
+    // Step 3: deduplicate by resumo fingerprint (catches same article with slightly diff title)
+    if (resumoCol && resumoCol !== keyCol && resumoCol !== titleCol) {
+      const r3 = removeDups(data, resumoCol, true);
+      dupResumo = r3.removed; data = r3.kept;
+    }
   }
+
   const clean = data.map(r => { const x={...r}; delete x._i; return x; });
-  return { clean, dupKey, dupTitle, keyCol, titleCol };
+  return { clean, dupKey, dupTitle, dupResumo, keyCol, titleCol, resumoCol };
 }
 
 // ── AI via Google Apps Script ─────────────────────────────────────────────────
@@ -501,7 +524,7 @@ async function getAIAnalysis(pr) {
   const summary = pr.results.map(r => ({
     arquivo: pr.file.name, planilha: r.sheetName,
     total_original: r.original,
-    duplicatas_removidas: r.dupKey + r.dupTitle,
+    duplicatas_removidas: r.dupKey + r.dupTitle + (r.dupResumo||0),
     registros_finais: r.clean.length,
     criterio_principal: r.keyCol || 'auto'
   }));
@@ -562,7 +585,7 @@ async function runDedup() {
             if (!rows.length) return null;
             const headers = Object.keys(rows[0]);
             const { clean, dupKey, dupTitle, keyCol, titleCol } = deduplicate(rows, headers);
-            return { sheetName, original: rows.length, clean, dupKey, dupTitle, keyCol, titleCol, headers };
+            return { sheetName, original: rows.length, clean, dupKey, dupTitle, dupResumo, keyCol, titleCol, resumoCol, headers };
           }).filter(Boolean);
           res({ file: f, results });
         } catch(err) { rej(err); }
@@ -597,8 +620,9 @@ function buildBlock(pr, idx) {
   const tOrig   = results.reduce((a,r) => a+r.original, 0);
   const tDupKey = results.reduce((a,r) => a+r.dupKey, 0);
   const tDupTit = results.reduce((a,r) => a+r.dupTitle, 0);
-  const tKept   = tOrig - tDupKey - tDupTit;
-  const pct     = tOrig ? Math.round((tDupKey+tDupTit)/tOrig*100) : 0;
+  const tDupRes = results.reduce((a,r) => a+(r.dupResumo||0), 0);
+  const tKept   = tOrig - tDupKey - tDupTit - tDupRes;
+  const pct     = tOrig ? Math.round((tDupKey+tDupTit+tDupRes)/tOrig*100) : 0;
   const wrap    = document.createElement('div');
   wrap.className = 'card';
   wrap.style.marginBottom = '18px';
@@ -610,10 +634,11 @@ function buildBlock(pr, idx) {
       <span class="card-title">${file.name}</span>
     </div>
     <div class="card-b">
-      <div class="stats-grid">
+      <div class="stats-grid" style="grid-template-columns:repeat(5,1fr)">
         <div class="stat"><div class="stat-val">${tOrig}</div><div class="stat-lbl">Originais</div></div>
         <div class="stat"><div class="stat-val r">−${tDupKey}</div><div class="stat-lbl">Dup. por ${results[0]?.keyCol||'chave'}</div></div>
         <div class="stat"><div class="stat-val r">−${tDupTit}</div><div class="stat-lbl">Dup. por título</div></div>
+        <div class="stat"><div class="stat-val r">−${tDupRes}</div><div class="stat-lbl">Dup. por resumo</div></div>
         <div class="stat"><div class="stat-val g">${tKept}</div><div class="stat-lbl">Mantidos (−${pct}%)</div></div>
       </div>
       ${aiEnabled && localStorage.getItem('worker_url') ? `
