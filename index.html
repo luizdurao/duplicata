@@ -552,10 +552,11 @@ async function getAIAnalysis(pr) {
 }
 
 async function getFuzzyDuplicates(pr) {
-  // Collect all titles from clean results
   const titleCol = pr.results[0]?.titleCol;
   if (!titleCol) throw new Error('Coluna de título não detectada.');
-  const titles = pr.results.flatMap(r => r.clean.map(row => row[titleCol] || '')).filter(t => t.trim());
+  // Send max 150 titles to keep prompt small and fast
+  const titles = pr.results.flatMap(r => r.clean.map(row => row[titleCol] || ''))
+    .filter(t => t.trim()).slice(0, 150);
   if (titles.length < 2) throw new Error('Poucos títulos para análise.');
   const data = await callScript({ mode: 'fuzzy', titles });
   return data.fuzzy;
@@ -669,14 +670,18 @@ async function runDedup() {
 
     const wurl = localStorage.getItem('worker_url'); if (aiEnabled && wurl) {
       const boxes = area.querySelectorAll('.ai-box');
-      for (let i = 0; i < boxes.length; i++) {
-        try {
-          const text = await getAIAnalysis(processed[i]);
-          boxes[i].querySelector('.ai-box-txt').innerHTML = text.replace(/\n\n/g,'<br><br>').replace(/\n/g,'<br>');
-        } catch(e) {
-          boxes[i].querySelector('.ai-box-txt').innerHTML = `<span style="color:var(--danger)">IA indisponível: ${e.message}</span>`;
-        }
-      }
+      await Promise.all(processed.map(async (pr, i) => {
+        const sBox = boxes[i];
+        const fBox = area.querySelector('#fuzzy-' + i);
+        await Promise.all([
+          getAIAnalysis(pr)
+            .then(t => { if(sBox) sBox.querySelector('.ai-box-txt').innerHTML = t.replace(/\n\n/g,'<br><br>').replace(/\n/g,'<br>'); })
+            .catch(e => { if(sBox) sBox.querySelector('.ai-box-txt').innerHTML = '<span style="color:var(--danger)">IA indisponível: '+e.message+'</span>'; }),
+          fBox
+            ? getFuzzyDuplicates(pr).then(f => renderFuzzyResults(fBox, f, pr, i)).catch(e => { fBox.innerHTML = '<div class="fuzzy-box-h"><span class="fuzzy-badge">IA Fuzzy</span></div><span style="color:var(--text3);font-size:12px">Fuzzy indisponível: '+e.message+'</span>'; })
+            : Promise.resolve()
+        ]);
+      }));
     }
   } catch(err) {
     area.innerHTML = `<div class="card"><div class="card-b" style="color:var(--danger);padding:22px">Erro: ${err.message}</div></div>`;
