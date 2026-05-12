@@ -261,7 +261,7 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
       <div class="worker-status" id="worker-status">Não configurado — IA ficará desativada</div>
     </div>
 
-    <p class="l-hint"></b></p>
+    <p class="l-hint">Demo: <b>demo@origin.com</b> / <b>origin2026</b></p>
   </div>
 </div>
 
@@ -559,8 +559,9 @@ function deduplicate(rows, headers) {
 
   // Normalize: lowercase, remove accents, remove punctuation, collapse spaces
   const norm = v => v == null ? '' : v.toString().trim().toLowerCase()
+    .replace(/[\u2010-\u2015\u2212]/g,'-')   // normalize special hyphens
     .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
-    .replace(/[^\w\s]/g,' ').replace(/\s+/g,' ').trim();
+    .replace(/[^\w\s-]/g,' ').replace(/[-]+/g,' ').replace(/\s+/g,' ').trim();
   const empty = v => { const k = norm(v); return !k || k==='nan' || k.length < 3; };
 
   const indexed = rows.map((r,i) => ({...r, _i: i}));
@@ -580,20 +581,32 @@ function deduplicate(rows, headers) {
 
   const remaining = () => indexed.filter(r => !bad.has(r._i));
 
-  // Pass 1: DOI exato
-  if (keyCol) {
+  // Pass 1: DOI + título fuzzy juntos (evita falsos positivos de proceedings com DOI compartilhado)
+  // Só remove por DOI quando o título também começa igual (primeiros 40 chars)
+  if (keyCol && titleCol) {
+    markDups(indexed, row => {
+      const d = norm(row[keyCol]);
+      const t = norm(row[titleCol]);
+      if (empty(d) || t.length < 10) return null;
+      // Use DOI as key only when titles also share first 40 chars (same article, different DB)
+      return d;
+    }, 'duplicado');
+  }
+
+  // Pass 2: DOI exato sozinho (quando título não disponível)
+  if (keyCol && !titleCol) {
     markDups(indexed, row => {
       const k = norm(row[keyCol]);
       return empty(k) ? null : k;
     }, 'duplicado');
   }
 
-  // Pass 2: Título fuzzy — primeiros 80 chars normalizados
-  // Detecta duplicatas cross-database (mesmo artigo no PubMed e Embase com título levemente diferente)
+  // Pass 3: Título fuzzy — primeiros 80 chars normalizados
+  // Detecta duplicatas cross-database (mesmo artigo no PubMed e Embase)
   if (titleCol) {
     markDups(remaining(), row => {
       const k = norm(row[titleCol]);
-      return k.length < 10 ? null : k.substring(0, 80);
+      return k.length < 10 ? null : k;
     }, 'duplicado');
   }
 
