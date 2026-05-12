@@ -216,6 +216,20 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
 }
 .confirm-all-btn:hover{background:#5fe08a}
 
+
+  /* ── ELEGIBILIDADE ── */
+  .eleg-field{margin-top:14px}
+  .eleg-field label{display:block;font-size:10px;font-weight:500;color:var(--text2);letter-spacing:.08em;text-transform:uppercase;margin-bottom:7px}
+  .eleg-field textarea{
+    width:100%;padding:10px 13px;min-height:90px;resize:vertical;
+    background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);
+    color:var(--text);font-family:'Inter',sans-serif;font-size:12px;line-height:1.6;
+    outline:none;transition:border-color .2s
+  }
+  .eleg-field textarea:focus{border-color:var(--green)}
+  .eleg-field textarea::placeholder{color:var(--text3)}
+  .eleg-hint{font-size:11px;color:var(--text3);margin-top:5px}
+
 </style>
 </head>
 <body>
@@ -231,7 +245,7 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
           <circle cx="10" cy="10" r="8"/><path d="M10 6v4l3 3"/>
         </svg>
       </div>
-      <span class="logo-txt">Origin <span>Health v18</span></span>
+      <span class="logo-txt">Origin <span>Health v19</span></span>
     </div>
     <h1>Acesso à plataforma</h1>
     <p class="sub">Ferramentas de inteligência para pesquisa em saúde</p>
@@ -352,6 +366,11 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
           <span class="ai-badge">IA</span>
           <span class="ai-toggle-txt"><b>Classificação de motivos com IA (Gemini)</b> — via Google Apps Script</span>
           <div class="sw on" id="ai-sw"><div class="knob"></div></div>
+        </div>
+        <div class="eleg-field" id="eleg-field">
+          <label>Critério de elegibilidade (PICO da revisão)</label>
+          <textarea id="eleg-text" placeholder="Descreva o PICO da sua revisão para guiar a IA na classificação.&#10;&#10;Exemplo: ECRs com P-CAB (tegoprazan, vonoprazan) vs IBP em adultos com DRGE, úlcera péptica ou erradicação de H. pylori. Desfechos: cura endoscópica, alívio sintomático, taxa de erradicação."></textarea>
+          <div class="eleg-hint">A IA usará esse critério para classificar cada artigo como incluir ou excluir.</div>
         </div>
         <div class="worker-warn" id="worker-warn" style="display:none">
           <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
@@ -687,7 +706,8 @@ async function getFuzzyDuplicates(pr) {
     const progressEl = document.getElementById('ia-progress');
     if (progressEl) progressEl.textContent = 'Classificando artigos ' + (start+1) + '–' + Math.min(start+BATCH, total) + ' de ' + total + '…';
 
-    const data = await callScript({ mode: 'classify', articles: batch });
+    const elegText = (document.getElementById('eleg-text')?.value || '').trim();
+    const data = await callScript({ mode: 'classify', articles: batch, elegibilidade: elegText });
     if (!data.classifications) throw new Error('Batch ' + start + ': ' + JSON.stringify(data).substring(0,150));
     data.classifications.forEach(c => {
       allClassifications.push({ ...c, index: c.index + start });
@@ -695,6 +715,24 @@ async function getFuzzyDuplicates(pr) {
   }
 
   return allClassifications;
+}
+
+
+function updateStatsPanel(prIdx, pr) {
+  const clean   = pr.results.reduce((a,r) => a+r.clean.length, 0);
+  const iaCount = (pr.results[0]?.removedRows||[]).concat(...pr.results.slice(1).map(r=>r.removedRows||[]))
+    .filter(x => x.reason !== 'duplicado').length;
+
+  const keptEl = document.getElementById('kept-val-' + prIdx);
+  const lblEl  = document.getElementById('kept-lbl-' + prIdx);
+  const iaEl   = document.getElementById('ia-val-'   + prIdx);
+
+  const origEl = document.querySelector('#stat-kept-' + prIdx)?.closest('.stats-grid')?.querySelector('.stat-val:first-child');
+  const tOrig  = parseInt(origEl?.textContent || '0') || pr.results.reduce((a,r)=>a+r.original,0);
+
+  if (keptEl) keptEl.textContent = clean;
+  if (lblEl)  lblEl.textContent  = 'Mantidos (−' + (tOrig ? Math.round((tOrig-clean)/tOrig*100) : 0) + '%)';
+  if (iaEl)   iaEl.textContent   = '−' + iaCount;
 }
 
 // ── Render removed rows list ─────────────────────────────────────────────────
@@ -876,12 +914,8 @@ function confirmMotivo(prIdx, rowIdx) {
         }
         offset += r.clean.length;
       });
-      // Update kept count in stats
-      const cards = document.querySelectorAll('#results .card');
-      if (cards[prIdx]) {
-        const kept = cards[prIdx].querySelectorAll('.stat-val.g')[0];
-        if (kept) kept.textContent = pr.results.reduce((a,r) => a+r.clean.length, 0);
-      }
+      // Update stats panel
+      updateStatsPanel(prIdx, pr);
     }
   }
 
@@ -909,6 +943,24 @@ function confirmAll(prIdx) {
   });
 }
 
+
+
+function updateStatsPanel(prIdx, pr) {
+  const clean   = pr.results.reduce((a,r) => a+r.clean.length, 0);
+  const iaCount = (pr.results[0]?.removedRows||[]).concat(...pr.results.slice(1).map(r=>r.removedRows||[]))
+    .filter(x => x.reason !== 'duplicado').length;
+
+  const keptEl = document.getElementById('kept-val-' + prIdx);
+  const lblEl  = document.getElementById('kept-lbl-' + prIdx);
+  const iaEl   = document.getElementById('ia-val-'   + prIdx);
+
+  const origEl = document.querySelector('#stat-kept-' + prIdx)?.closest('.stats-grid')?.querySelector('.stat-val:first-child');
+  const tOrig  = parseInt(origEl?.textContent || '0') || pr.results.reduce((a,r)=>a+r.original,0);
+
+  if (keptEl) keptEl.textContent = clean;
+  if (lblEl)  lblEl.textContent  = 'Mantidos (−' + (tOrig ? Math.round((tOrig-clean)/tOrig*100) : 0) + '%)';
+  if (iaEl)   iaEl.textContent   = '−' + iaCount;
+}
 
 // ── Render removed rows list ─────────────────────────────────────────────────
 function renderRemovedList(pr, idx) {
@@ -1229,11 +1281,12 @@ function buildBlock(pr, idx) {
       <span class="card-title">${file.name}</span>
     </div>
     <div class="card-b">
-      <div class="stats-grid" style="grid-template-columns:repeat(4,1fr)">
+      <div class="stats-grid" style="grid-template-columns:repeat(5,1fr)">
         <div class="stat"><div class="stat-val">${tOrig}</div><div class="stat-lbl">Originais</div></div>
         <div class="stat"><div class="stat-val r">−${tDupKey}</div><div class="stat-lbl">Dup. por DOI</div></div>
         <div class="stat"><div class="stat-val r">−${tDupTit}</div><div class="stat-lbl">Dup. por Título</div></div>
-        <div class="stat"><div class="stat-val g">${tKept}</div><div class="stat-lbl">Mantidos (−${pct}%)</div></div>
+        <div class="stat" id="stat-kept-${idx}"><div class="stat-val g" id="kept-val-${idx}">${tKept}</div><div class="stat-lbl" id="kept-lbl-${idx}">Mantidos (−${pct}%)</div></div>
+        <div class="stat" id="stat-ia-${idx}"><div class="stat-val r" id="ia-val-${idx}">−0</div><div class="stat-lbl">Excluídos pela IA</div></div>
       </div>
       ${aiEnabled && localStorage.getItem('worker_url') ? `
       <div class="fuzzy-box" id="fuzzy-${idx}">
