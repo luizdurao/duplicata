@@ -179,6 +179,43 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
 .fuzzy-rm-btn:hover{background:var(--danger-bg);border-color:var(--danger)}
 .fuzzy-rm-btn.removed{color:var(--text3);border-color:var(--border);cursor:default;opacity:.5}
 .fuzzy-obs{font-size:12px;color:var(--text2);margin-top:10px;padding-top:10px;border-top:1px solid var(--border)}
+
+/* ── REVIEW TABLE ── */
+.review-section{margin-bottom:14px}
+.review-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.review-count{font-size:12px;color:var(--text2)}
+.review-table-wrap{max-height:400px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius)}
+.review-table{width:100%;border-collapse:collapse;font-size:12px}
+.review-table th{text-align:left;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--text3);padding:8px 10px;border-bottom:1px solid var(--border);background:var(--bg3);position:sticky;top:0;z-index:1}
+.review-table td{padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:middle}
+.review-table tr:last-child td{border-bottom:none}
+.review-table tr:hover td{background:rgba(74,207,120,.03)}
+.review-title-td{max-width:320px;color:var(--text2);line-height:1.4;font-size:11px}
+.review-motivo-select{
+  width:100%;padding:5px 8px;
+  background:var(--bg3);border:1px solid var(--border);
+  border-radius:6px;color:var(--text);
+  font-family:'Inter',sans-serif;font-size:11px;outline:none;
+  transition:border-color .2s;cursor:pointer;min-width:160px
+}
+.review-motivo-select:focus{border-color:var(--green)}
+.review-motivo-select.ia-suggested{border-color:rgba(224,160,82,.4);background:rgba(224,160,82,.05)}
+.review-motivo-select.confirmed{border-color:var(--green);background:var(--green-dim)}
+.review-confirm-btn{
+  font-size:10px;padding:4px 9px;background:transparent;
+  border:1px solid var(--border2);border-radius:5px;
+  color:var(--text2);cursor:pointer;transition:all .2s;white-space:nowrap
+}
+.review-confirm-btn:hover{background:var(--green-dim);color:var(--green);border-color:var(--green)}
+.review-confirm-btn.done{color:var(--green);border-color:var(--green);opacity:.6;cursor:default}
+.review-source{font-size:10px;color:var(--text3);white-space:nowrap}
+.confirm-all-btn{
+  padding:8px 16px;background:var(--green);color:#080c0b;
+  border:none;border-radius:var(--radius);font-family:'Syne',sans-serif;
+  font-size:12px;font-weight:700;cursor:pointer;transition:background .2s
+}
+.confirm-all-btn:hover{background:#5fe08a}
+
 </style>
 </head>
 <body>
@@ -224,7 +261,7 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
       <div class="worker-status" id="worker-status">Não configurado — IA ficará desativada</div>
     </div>
 
-    <p class="l-hint">Demo: <b></p>
+    <p class="l-hint">Demo: <b>demo@origin.com</b> / <b>origin2026</b></p>
   </div>
 </div>
 
@@ -252,7 +289,7 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
     <div class="ph">
       <div class="eyebrow">Ferramenta de dados</div>
       <div class="ptitle">Deduplicador de Planilhas</div>
-      <p class="pdesc">Carregue arquivos .xlsx, identifique duplicatas por DOI e Título, e baixe a planilha com coluna de status preenchida — pronta para o PRISMA.</p>
+      <p class="pdesc">Carregue sua planilha de busca, detecte duplicatas automaticamente e use a IA para sugerir o motivo de exclusão de cada artigo. Revise, confirme e baixe a planilha pronta para o PRISMA.</p>
     </div>
 
     <!-- Upload -->
@@ -516,14 +553,15 @@ function detectResumoCol(headers) {
 }
 function deduplicate(rows, headers) {
   const keepWhich = document.getElementById('keep-which').value;
-  const alsoTitle = document.getElementById('also-title').checked;
   const keyCol    = detectKeyCol(headers);
   const titleCol  = detectTitleCol(headers);
   const resumoCol = detectResumoCol(headers);
 
+  // Normalize: lowercase, remove accents, remove punctuation, collapse spaces
   const norm = v => v == null ? '' : v.toString().trim().toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g,'');
-  const empty = v => { const k = norm(v); return !k || k==='nan' || k==='undefined' || k==='null' || k.length < 3; };
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/[^\w\s]/g,' ').replace(/\s+/g,' ').trim();
+  const empty = v => { const k = norm(v); return !k || k==='nan' || k.length < 3; };
 
   const indexed = rows.map((r,i) => ({...r, _i: i}));
   const bad = new Set();
@@ -542,7 +580,7 @@ function deduplicate(rows, headers) {
 
   const remaining = () => indexed.filter(r => !bad.has(r._i));
 
-  // Pass 1: DOI idêntico (critério mais forte)
+  // Pass 1: DOI exato
   if (keyCol) {
     markDups(indexed, row => {
       const k = norm(row[keyCol]);
@@ -550,26 +588,21 @@ function deduplicate(rows, headers) {
     }, 'duplicado');
   }
 
-  // Pass 2: Título idêntico (sempre ativo — principal critério quando DOI está ausente)
+  // Pass 2: Título fuzzy — primeiros 80 chars normalizados
+  // Detecta duplicatas cross-database (mesmo artigo no PubMed e Embase com título levemente diferente)
   if (titleCol) {
     markDups(remaining(), row => {
       const k = norm(row[titleCol]);
-      return empty(k) ? null : k;
+      return k.length < 10 ? null : k.substring(0, 80);
     }, 'duplicado');
   }
 
-  const clean    = indexed.filter(r => !bad.has(r._i)).map(r => { const x={...r}; delete x._i; return x; });
-  const dupDOI   = removedRows.filter((x,i,a) => {
-    // Count DOI dups: rows where DOI is not empty and was the reason
-    const doiVal = norm(x.row[keyCol] || '');
-    return !empty(doiVal);
-  }).length;
-  const dupTitle2 = removedRows.length - dupDOI;
-  const dupResumo = 0;
-  const dupBoth   = 0;
+  const clean      = indexed.filter(r => !bad.has(r._i)).map(r => { const x={...r}; delete x._i; return x; });
+  const dupDOI     = removedRows.filter(item => { const k = norm((item.row[keyCol]||'')); return !empty(k); }).length;
+  const dupTitle2  = removedRows.length - dupDOI;
   const cleanedRows = removedRows.map(item => { const r={...item.row}; delete r._i; return { row:r, reason:item.reason }; });
 
-  return { clean, dupKey: dupDOI, dupTitle: dupTitle2, dupResumo, dupBoth, keyCol, titleCol, resumoCol, removedRows: cleanedRows };
+  return { clean, dupKey: dupDOI, dupTitle: dupTitle2, dupResumo: 0, dupBoth: 0, keyCol, titleCol, resumoCol, removedRows: cleanedRows };
 }
 
 // ── AI via Google Apps Script ─────────────────────────────────────────────────
@@ -631,6 +664,202 @@ async function getFuzzyDuplicates(pr) {
   const data = await callScript({ mode: 'classify', articles });
   return data.classifications;
 }
+
+// ── Render removed rows list ─────────────────────────────────────────────────
+function renderRemovedList(pr, idx) {
+  const allRemoved = pr.results.flatMap(r => r.removedRows || []);
+  if (!allRemoved.length) return '';
+  const titleCol = getTitleCol(pr);
+  const keyCol   = pr.results[0]?.keyCol || '';
+  const rows = allRemoved.map(function(item) {
+    const row = item.row, reason = item.reason;
+    const title = titleCol ? (row[titleCol] || '—') : '—';
+    const key   = keyCol   ? (row[keyCol]   || '—') : '—';
+    const cls   = reason.includes('DOI') ? 'doi' : reason.includes('Título') ? 'titulo' : 'resumo';
+    return '<tr><td>' + title + '</td><td style="color:var(--text3);font-size:11px">' + key + '</td><td><span class="removed-reason ' + cls + '">' + reason + '</span></td></tr>';
+  }).join('');
+  return '<div class="removed-section">' +
+    '<div class="removed-toggle" id="rt-' + idx + '" onclick="toggleRemoved(' + idx + ')">' +
+      '<span>📋 ' + allRemoved.length + ' registro' + (allRemoved.length !== 1 ? 's' : '') + ' removido' + (allRemoved.length !== 1 ? 's' : '') + ' — ver lista completa</span>' +
+      '<span class="removed-toggle-arrow">▼</span>' +
+    '</div>' +
+    '<div class="removed-list" id="rl-' + idx + '">' +
+      '<div class="removed-table-wrap"><table class="removed-table">' +
+        '<thead><tr><th>Título</th><th>DOI / ID</th><th>Motivo</th></tr></thead>' +
+        '<tbody>' + rows + '</tbody>' +
+      '</table></div>' +
+    '</div>' +
+  '</div>';
+}
+function toggleRemoved(idx) {
+  var t = document.getElementById('rt-' + idx);
+  var l = document.getElementById('rl-' + idx);
+  if (t) t.classList.toggle('open');
+  if (l) l.classList.toggle('open');
+}
+
+// ── Render fuzzy results ─────────────────────────────────────────────────────
+function getTitleCol(pr) {
+  let col = pr.results[0]?.titleCol;
+  if (!col && pr.results[0]?.headers?.length >= 4) col = pr.results[0].headers[3];
+  return col;
+}
+
+function detectMotivoCol(headers) {
+  const n = h => h.toString().trim().toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,'');
+  // Prefer the non-ISA column (just 'Motivo de exclusão')
+  const candidates = headers.filter(h => n(h).includes('motivodeexclusao') || n(h).includes('motivoexclusao'));
+  // Return the one WITHOUT 'isa' first
+  return candidates.find(h => !h.toLowerCase().includes('isa')) || candidates[0] || null;
+}
+
+function detectStatusCol(headers) {
+  const n = h => h.toString().trim().toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,'');
+  const candidates = headers.filter(h => n(h).includes('statusdeinclusao') || n(h).includes('statusinc'));
+  return candidates.find(h => !h.toLowerCase().includes('isa')) || candidates[0] || null;
+}
+
+const MOTIVOS_LIST = [
+  '', 'duplicado', 'idioma', 'resumo', 'observacional', 'população',
+  'desfechos', 'intervenção', 'comparador', 'animais', 'in vitro',
+  'editorial', 'protocolo', 'relato de caso', 'outro tipo de revisão',
+  'fase I', 'errata', 'proceedings', 'consenso'
+];
+
+// Store review state: prIdx → { rowIdx: { motivo, confirmed } }
+const reviewState = {};
+
+function renderFuzzyResults(box, classifications, pr, idx) {
+  const titleCol = getTitleCol(pr);
+  const allRows  = pr.results.flatMap(r => r.clean);
+  const fuzzyMap = pr._fuzzyMap || null;
+
+  // Build review state for this pr
+  if (!reviewState[idx]) reviewState[idx] = {};
+
+  // Merge AI classifications into state
+  if (classifications && classifications.length) {
+    classifications.forEach(c => {
+      const realIdx = fuzzyMap ? (fuzzyMap[c.index] ?? c.index) : c.index;
+      const m = (c.motivo||'').toLowerCase().trim();
+      const isIncluir = ['incluir','incluído','incluido','manter'].some(x => m.includes(x));
+      if (!isIncluir && m) {
+        if (!reviewState[idx][realIdx]) {
+          reviewState[idx][realIdx] = { motivo: c.motivo, justificativa: c.justificativa||'', confirmed: false, iaSource: true };
+        }
+      }
+    });
+  }
+
+  const entries = Object.entries(reviewState[idx]);
+  if (!entries.length) {
+    box.innerHTML = '<div class="fuzzy-box-h"><span class="fuzzy-badge">IA</span><span class="ai-box-title">IA não sugeriu exclusões adicionais</span></div>';
+    return;
+  }
+
+  const unconfirmed = entries.filter(([,v]) => !v.confirmed).length;
+  box.innerHTML = renderReviewTable(idx, allRows, titleCol, entries, unconfirmed);
+}
+
+function renderReviewTable(idx, allRows, titleCol, entries, unconfirmed) {
+  const opts = MOTIVOS_LIST.map(m =>
+    '<option value="' + m + '">' + (m || '— sem exclusão —') + '</option>'
+  ).join('');
+
+  const rows = entries.map(([ri, state]) => {
+    const row = allRows[parseInt(ri)];
+    const title = row ? (titleCol ? (row[titleCol]||'—') : '—') : '—';
+    const fonte = row ? (row['Fonte'] || row['fonte'] || '') : '';
+    const selClass = state.confirmed ? 'confirmed' : (state.iaSource ? 'ia-suggested' : '');
+    const btnClass = state.confirmed ? 'done' : '';
+    const btnTxt   = state.confirmed ? '✓' : 'Confirmar';
+    const selected = opts.replace('value="' + state.motivo + '"', 'value="' + state.motivo + '" selected');
+    return '<tr id="rr-' + idx + '-' + ri + '">' +
+      '<td class="review-title-td">' + title + '</td>' +
+      '<td class="review-source">' + fonte + '</td>' +
+      '<td><select class="review-motivo-select ' + selClass + '" onchange="updateMotivo(' + idx + ',' + ri + ',this.value)">' + selected + '</select></td>' +
+      '<td style="white-space:nowrap">' +
+        (state.justificativa ? '<div style="font-size:10px;color:var(--text3);margin-bottom:4px;font-style:italic">' + state.justificativa + '</div>' : '') +
+        '<button class="review-confirm-btn ' + btnClass + '" onclick="confirmMotivo(' + idx + ',' + ri + ')" ' + (state.confirmed?'disabled':'') + '>' + btnTxt + '</button>' +
+      '</td>' +
+    '</tr>';
+  }).join('');
+
+  return '<div class="review-section">' +
+    '<div class="review-header">' +
+      '<div>' +
+        '<span class="fuzzy-badge" style="background:#e0a052">IA</span> ' +
+        '<span style="font-size:13px;font-weight:500;margin-left:6px">Sugestões de motivo de exclusão</span>' +
+      '</div>' +
+      '<div style="display:flex;align-items:center;gap:10px">' +
+        '<span class="review-count">' + unconfirmed + ' pendente' + (unconfirmed!==1?'s':'') + '</span>' +
+        '<button class="confirm-all-btn" onclick="confirmAll(' + idx + ')">Confirmar todas</button>' +
+      '</div>' +
+    '</div>' +
+    '<div class="review-table-wrap">' +
+      '<table class="review-table">' +
+        '<thead><tr><th>Título</th><th>Fonte</th><th>Motivo sugerido</th><th>Ação</th></tr></thead>' +
+        '<tbody>' + rows + '</tbody>' +
+      '</table>' +
+    '</div>' +
+  '</div>';
+}
+
+function updateMotivo(prIdx, rowIdx, motivo) {
+  if (!reviewState[prIdx]) reviewState[prIdx] = {};
+  if (!reviewState[prIdx][rowIdx]) reviewState[prIdx][rowIdx] = {};
+  reviewState[prIdx][rowIdx].motivo = motivo;
+  reviewState[prIdx][rowIdx].confirmed = false;
+  const sel = document.querySelector('#rr-' + prIdx + '-' + rowIdx + ' .review-motivo-select');
+  if (sel) { sel.className = 'review-motivo-select ia-suggested'; }
+}
+
+function confirmMotivo(prIdx, rowIdx) {
+  if (!reviewState[prIdx]?.[rowIdx]) return;
+  const state = reviewState[prIdx][rowIdx];
+  state.confirmed = true;
+
+  // Apply to pr data
+  const pr = processedResults[prIdx];
+  if (pr) {
+    let offset = 0;
+    pr.results.forEach(r => {
+      const li = parseInt(rowIdx) - offset;
+      if (li >= 0 && li < r.clean.length) {
+        // Store motivo on the row itself for download
+        if (!r._motivoMap) r._motivoMap = {};
+        r._motivoMap[li] = state.motivo;
+      }
+      offset += r.clean.length;
+    });
+  }
+
+  // Update UI
+  const row = document.getElementById('rr-' + prIdx + '-' + rowIdx);
+  if (row) {
+    const sel = row.querySelector('.review-motivo-select');
+    const btn = row.querySelector('.review-confirm-btn');
+    if (sel) sel.className = 'review-motivo-select confirmed';
+    if (btn) { btn.textContent = '✓'; btn.className = 'review-confirm-btn done'; btn.disabled = true; }
+  }
+  // Update pending count
+  const box = document.querySelector('#fuzzy-' + prIdx);
+  if (box) {
+    const pending = Object.values(reviewState[prIdx]).filter(v => !v.confirmed).length;
+    const countEl = box.querySelector('.review-count');
+    if (countEl) countEl.textContent = pending + ' pendente' + (pending!==1?'s':'');
+  }
+}
+
+function confirmAll(prIdx) {
+  const state = reviewState[prIdx] || {};
+  Object.keys(state).forEach(ri => {
+    if (!state[ri].confirmed) confirmMotivo(prIdx, parseInt(ri));
+  });
+}
+
 
 // ── Render removed rows list ─────────────────────────────────────────────────
 function renderRemovedList(pr, idx) {
@@ -811,49 +1040,68 @@ function downloadDuplicates(idx) {
   XLSX.writeFile(wb, pr.file.name.replace(/\.xlsx?$/i,'') + '_duplicados_PRISMA.xlsx');
 }
 
-// 3. Full file — all rows, duplicates marked with 'Motivo de exclusão' = 'duplicado'
-// Mirrors the format of the model spreadsheet
+// 3. Full file — all rows with motivos preenchidos (duplicados + sugestões IA confirmadas)
 function downloadFull(idx) {
   const pr = processedResults[idx];
   if (!pr) return;
   const wb = XLSX.utils.book_new();
-  pr.results.forEach(r => {
-    // Build a Set of clean row keys for fast lookup
-    const titleCol = r.titleCol || '';
-    const keyCol   = r.keyCol   || '';
 
-    // Map: identify removed rows by their original content
-    const removedSet = new Set();
+  pr.results.forEach(r => {
+    const titleCol  = r.titleCol  || '';
+    const keyCol    = r.keyCol    || '';
+    const motivoCol = detectMotivoCol(r.headers);
+    const statusCol = detectStatusCol(r.headers);
+    const fk = r.headers[0];
+
+    // Build set of removed row keys
+    const removedKeys = new Set();
+    const removedMotivos = new Map();
     (r.removedRows||[]).forEach(item => {
-      // Use title+doi as unique key
-      const t = titleCol ? (item.row[titleCol]||'') : '';
-      const d = keyCol   ? (item.row[keyCol]||'')   : '';
-      removedSet.add(t + '|||' + d);
+      const k = (titleCol ? (item.row[titleCol]||'') : '') + '|||' + (keyCol ? (item.row[keyCol]||'') : '');
+      removedKeys.add(k);
+      removedMotivos.set(k, item.reason || 'duplicado');
     });
 
-    // Find which headers are 'Status de inclusão' and 'Motivo de exclusão'
-    const normH = h => h.toString().trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,'');
-    const statusCol = r.headers.find(h => normH(h).includes('statusdeinclusao') || normH(h).includes('statusinc')) || null;
-    const motivoCol = r.headers.find(h => normH(h).includes('motivodeexclusao') || normH(h).includes('motivoexc')) || null;
-
-    // Rebuild all original rows (clean + removed) sorted by original index
+    // Rebuild all rows (clean + removed) sorted by N
     const allRows = [
-      ...r.clean.map(row => ({...row})),
-      ...(r.removedRows||[]).map(item => ({...item.row}))
+      ...r.clean.map((row, li) => ({ ...row, _li: li, _removed: false })),
+      ...(r.removedRows||[]).map(item => ({ ...item.row, _li: -1, _removed: true, _reason: item.reason }))
     ];
-    // Sort by first numeric column (N)
-    const fk = r.headers[0];
     if (fk) allRows.sort((a,b) => (Number(a[fk])||0) - (Number(b[fk])||0));
 
-    // Mark duplicates — fill 'Motivo de exclusão' = 'duplicado' and status = 'Excluído'
-    const markedRows = allRows.map(row => {
-      const t = titleCol ? (row[titleCol]||'') : '';
-      const d = keyCol   ? (row[keyCol]||'')   : '';
-      const isDup = removedSet.has(t + '|||' + d);
+    // Apply motivos
+    const iaState = reviewState[idx] || {};
+
+    const markedRows = allRows.map((row, arrIdx) => {
       const out = {...row};
-      if (isDup) {
-        if (motivoCol) out[motivoCol] = 'duplicado';
-        if (statusCol) out[statusCol] = 'Excluído';
+      delete out._li; delete out._removed; delete out._reason;
+
+      if (row._removed) {
+        // Already excluded as duplicate
+        if (motivoCol && !out[motivoCol]) out[motivoCol] = row._reason || 'duplicado';
+        if (statusCol && !out[statusCol]) out[statusCol] = 'Excluído';
+      } else {
+        // Clean row — check if IA suggested a motivo that was confirmed
+        const li = row._li;
+        // Find in reviewState by matching title+doi
+        let iaMotivo = null;
+        Object.entries(iaState).forEach(([ri, state]) => {
+          if (state.confirmed && state.motivo) {
+            const pr2 = processedResults[idx];
+            let offset2 = 0;
+            pr2.results.forEach(r2 => {
+              const localIdx = parseInt(ri) - offset2;
+              if (localIdx === li && localIdx >= 0 && localIdx < r2.clean.length) {
+                iaMotivo = state.motivo;
+              }
+              offset2 += r2.clean.length;
+            });
+          }
+        });
+        if (iaMotivo && motivoCol) {
+          out[motivoCol] = iaMotivo;
+          if (statusCol) out[statusCol] = 'Excluído';
+        }
       }
       return out;
     });
@@ -862,7 +1110,7 @@ function downloadFull(idx) {
     ws['!cols'] = autoWidths(r.headers);
     XLSX.utils.book_append_sheet(wb, ws, r.sheetName.substring(0, 31));
   });
-  XLSX.writeFile(wb, pr.file.name.replace(/\.xlsx?$/i,'') + '_com_duplicados_marcados.xlsx');
+  XLSX.writeFile(wb, pr.file.name.replace(/\.xlsx?$/i,'') + '_com_motivos.xlsx');
 }
 
 // ── Run ───────────────────────────────────────────────────────────────────────
@@ -944,9 +1192,9 @@ function buildBlock(pr, idx) {
       <div class="fuzzy-box" id="fuzzy-${idx}">
         <div class="fuzzy-box-h">
           <span class="fuzzy-badge">IA Fuzzy</span>
-          <span class="ai-box-title">Classificando motivos de exclusão com IA…</span>
+          <span class="ai-box-title">IA classificando motivos de exclusão…</span>
         </div>
-        <div class="ai-loading"><div class="spinner"></div>Classificando artigos por motivo de exclusão…</div>
+        <div class="ai-loading"><div class="spinner"></div>Analisando título e resumo de cada artigo…</div>
       </div>` : ''}
       ${renderRemovedList(pr, idx)}
       <div style="display:flex;gap:10px;flex-wrap:wrap">
