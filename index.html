@@ -233,7 +233,7 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
       </div>
       <span class="logo-txt">Origin <span>Health</span></span>
     </div>
-    <h1>Acesso à plataforma</h1>
+    <h1>Acesso à plataforma v13</h1>
     <p class="sub">Ferramentas de inteligência para pesquisa em saúde</p>
     <div class="field">
       <label>E-mail</label>
@@ -623,20 +623,30 @@ async function callScript(payload) {
   const scriptUrl = localStorage.getItem('worker_url');
   if (!scriptUrl) throw new Error('URL do Apps Script não configurada.');
   const params = new URLSearchParams({ data: JSON.stringify(payload) });
-  const resp = await fetch(scriptUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: params.toString(),
-    redirect: 'follow'
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 55000); // 55s timeout
+  let resp;
+  try {
+    resp = await fetch(scriptUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params.toString(),
+      redirect: 'follow',
+      signal: controller.signal
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
   const text = await resp.text();
+  if (!text || !text.trim()) throw new Error('Apps Script retornou resposta vazia. Verifique os logs em script.google.com.');
   try {
     const data = JSON.parse(text);
-    if (data.error) throw new Error(data.error);
+    if (data.error) throw new Error('Apps Script: ' + data.error);
     return data;
   } catch(e) {
-    if (text && text.length > 10) return { text };
-    throw new Error('Resposta inválida: ' + text.substring(0, 100));
+    if (e.message.startsWith('Apps Script:')) throw e;
+    // Not JSON — show first 200 chars
+    throw new Error('Resposta não é JSON: ' + text.substring(0, 200));
   }
 }
 
@@ -662,7 +672,7 @@ async function getFuzzyDuplicates(pr) {
   const allRows = pr.results.flatMap(r => r.clean);
 
   // Send in batches of 60 for speed/token limits
-  const BATCH = 60;
+  const BATCH = 30;
   pr._fuzzyMap = allRows.map((_, i) => i);
 
   const articles = allRows.map(row => ({
@@ -675,7 +685,7 @@ async function getFuzzyDuplicates(pr) {
   pr._fuzzyMap = allRows.slice(0, BATCH).map((_, i) => i);
 
   const data = await callScript({ mode: 'classify', articles: batch });
-  if (!data.classifications) throw new Error(data.error || 'Sem resposta da IA');
+  if (!data.classifications) throw new Error('Apps Script não retornou classifications. Resposta: ' + JSON.stringify(data).substring(0,150));
   return data.classifications;
 }
 
@@ -944,43 +954,6 @@ const MOTIVO_CLS = {
 };
 function motivoCls(m) { return MOTIVO_CLS[(m||'').toLowerCase().trim()] || 'titulo'; }
 
-function renderFuzzyResults(box, classifications, pr, idx) {
-  if (!classifications || !classifications.length) {
-    box.innerHTML = '<div class="fuzzy-box-h"><span class="fuzzy-badge">IA</span><span class="ai-box-title">Nenhuma sugestão de exclusão adicional</span></div>';
-    return;
-  }
-  const titleCol = getTitleCol(pr);
-  const allRows  = pr.results.flatMap(r => r.clean);
-  const fuzzyMap = pr._fuzzyMap || null;
-  const toExclude = classifications.filter(c => {
-    const m = (c.motivo||'').toLowerCase().trim();
-    return m && !['incluir','incluído','incluido','manter','sem motivo'].some(x => m.includes(x));
-  });
-  if (!toExclude.length) {
-    box.innerHTML = '<div class="fuzzy-box-h"><span class="fuzzy-badge">IA</span><span class="ai-box-title">IA não sugeriu exclusões adicionais nos artigos analisados</span></div>';
-    return;
-  }
-  let html = '<div class="fuzzy-box-h"><span class="fuzzy-badge">IA</span><span class="ai-box-title">IA sugeriu ' + toExclude.length + ' exclusão' + (toExclude.length!==1?'ões':'') + ' — revise e aplique</span></div>';
-  toExclude.forEach((item, di) => {
-    const realIdx = fuzzyMap ? (fuzzyMap[item.index] ?? item.index) : item.index;
-    const row = allRows[realIdx];
-    const title = row ? (titleCol ? (row[titleCol]||'—') : '—') : '—';
-    const cls = motivoCls(item.motivo||'');
-    html +=
-      '<div class="fuzzy-item" id="fuzzy-item-' + idx + '-' + di + '">' +
-        '<div class="fuzzy-item-info">' +
-          '<div class="fuzzy-title-cell" style="font-size:12px;margin-bottom:6px">' + title + '</div>' +
-          '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
-            '<span class="removed-reason ' + cls + '">' + (item.motivo||'?') + '</span>' +
-            (item.justificativa ? '<span style="font-size:11px;color:var(--text3);font-style:italic">' + item.justificativa + '</span>' : '') +
-          '</div>' +
-        '</div>' +
-        '<button class="fuzzy-rm-btn" data-motivo="' + (item.motivo||'').replace(/"/g,'') + '" onclick="applyIAExclusion(' + idx + ',' + realIdx + ',' + di + ',this.dataset.motivo)">Aplicar exclusão</button>' +
-      '</div>';
-  });
-  box.innerHTML = html;
-}
-
 function applyIAExclusion(prIdx, realIdx, itemIdx, motivo) {
   const pr = processedResults[prIdx];
   if (!pr) return;
@@ -1008,6 +981,33 @@ function applyIAExclusion(prIdx, realIdx, itemIdx, motivo) {
   if (cards[prIdx]) {
     const kept = cards[prIdx].querySelectorAll('.stat-val.g')[0];
     if (kept) kept.textContent = pr.results.reduce((a,r) => a+r.clean.length, 0);
+  }
+}
+
+
+// ── Diagnostics ───────────────────────────────────────────────────────────────
+async function testScript() {
+  const url = localStorage.getItem('worker_url');
+  if (!url) { alert('URL não configurada.'); return; }
+  try {
+    const resp = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(10000) });
+    const text = await resp.text();
+    alert('Resposta do Apps Script:\n' + text.substring(0, 500));
+  } catch(e) {
+    alert('Erro: ' + e.message);
+  }
+}
+
+async function retryIA(idx) {
+  const fBox = document.querySelector('#fuzzy-' + idx);
+  const pr = processedResults[idx];
+  if (!fBox || !pr) return;
+  fBox.innerHTML = '<div class="fuzzy-box-h"><span class="fuzzy-badge">IA</span><span class="ai-box-title">Tentando novamente…</span></div><div class="ai-loading"><div class="spinner"></div>Classificando artigos…</div>';
+  try {
+    const f = await getFuzzyDuplicates(pr);
+    renderFuzzyResults(fBox, f, pr, idx);
+  } catch(e) {
+    fBox.innerHTML = '<div class="fuzzy-box-h"><span class="fuzzy-badge">IA</span></div><span style="color:var(--danger);font-size:12px">' + e.message + '</span>';
   }
 }
 
@@ -1186,7 +1186,16 @@ async function runDedup() {
         if (fBox) {
           await getFuzzyDuplicates(pr)
             .then(f => renderFuzzyResults(fBox, f, pr, i))
-            .catch(e => { fBox.innerHTML = '<div class="fuzzy-box-h"><span class="fuzzy-badge">IA Fuzzy</span></div><span style="color:var(--text3);font-size:12px">Fuzzy indisponível: '+e.message+'</span>'; });
+            .catch(e => {
+              fBox.innerHTML =
+                '<div class="fuzzy-box-h"><span class="fuzzy-badge">IA</span>' +
+                '<span class="ai-box-title" style="color:var(--danger)">IA indisponível</span></div>' +
+                '<div style="font-size:12px;color:var(--text3);margin-top:8px;line-height:1.6">' +
+                  e.message +
+                  '<br><br><button onclick="retryIA(' + i + ')" style="margin-top:8px;padding:6px 14px;background:var(--green-dim);border:1px solid var(--border2);border-radius:6px;color:var(--green);font-size:12px;cursor:pointer">Tentar novamente</button>' +
+                  '<button onclick="testScript()" style="margin-top:8px;margin-left:8px;padding:6px 14px;background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--text3);font-size:12px;cursor:pointer">Testar conexão</button>' +
+                '</div>';
+            });
         }
       }));
     }
