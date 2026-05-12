@@ -309,7 +309,7 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
         </div>
         <div class="cb-row">
           <input type="checkbox" id="also-title" checked>
-          <span>Também deduplicar por título e resumo (útil quando DOI está ausente)</span>
+          <span>Remover quando Título <b>ou</b> DOI coincidem (além de Título+DOI simultâneos)</span>
         </div>
         <div class="ai-toggle" onclick="toggleAI()" id="ai-toggle">
           <span class="ai-badge">IA</span>
@@ -515,79 +515,76 @@ function detectResumoCol(headers) {
   return headers.find(h => n(h).includes('resumo') || n(h).includes('abstract') || n(h).includes('summary')) || null;
 }
 function deduplicate(rows, headers) {
-  const keepWhich  = document.getElementById('keep-which').value;
-  const alsoTitle  = document.getElementById('also-title').checked;
-  const keyCol     = detectKeyCol(headers);
-  const titleCol   = detectTitleCol(headers);
-  const resumoCol  = detectResumoCol(headers);
+  const keepWhich = document.getElementById('keep-which').value;
+  const alsoSep   = document.getElementById('also-title').checked; // also remove by título OR doi separately
+  const keyCol    = detectKeyCol(headers);   // DOI/PMID/ID col
+  const titleCol  = detectTitleCol(headers); // Título col
+  const resumoCol = detectResumoCol(headers);
 
-  // Build a short fingerprint of resumo (first 120 chars) to avoid false positives
-  const norm = v => v == null ? '' : v.toString().trim().toLowerCase();
+  const norm = v => v == null ? '' : v.toString().trim().toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'');
   const normResumo = v => norm(v).replace(/\s+/g,' ').substring(0, 120);
+  const empty = v => { const k = norm(v); return !k || k==='nan' || k==='undefined' || k==='null' || k.length < 3; };
 
-  let data = rows.map((r,i) => ({...r, _i: i}));
+  const indexed = rows.map((r,i) => ({...r, _i: i}));
+  const bad = new Set();
+  const removedRows = [];
 
-  function removeDups(arr, col, useShort) {
-    if (!col) return { kept: arr, removed: 0 };
-    const seen = new Map(), bad = new Set();
+  // Helper: mark duplicates and record reason
+  function markDups(arr, keyFn, reason) {
+    const seen = new Map();
     const work = keepWhich === 'last' ? [...arr].reverse() : arr;
     work.forEach(row => {
-      const k = useShort ? normResumo(row[col]) : norm(row[col]);
-      if (!k || k==='nan' || k==='undefined' || k==='null' || k.length < 3) return;
-      if (seen.has(k)) bad.add(row._i); else seen.set(k, true);
-    });
-    return { kept: arr.filter(r => !bad.has(r._i)), removed: bad.size };
-  }
-
-  // Step 1: deduplicate by primary key (DOI/PMID/etc)
-  const r1 = removeDups(data, keyCol, false);
-  let dupKey = r1.removed; data = r1.kept;
-
-  let dupTitle = 0, dupResumo = 0;
-  if (alsoTitle) {
-    // Step 2: deduplicate by title (only rows without valid key OR with same title)
-    if (titleCol && titleCol !== keyCol) {
-      const r2 = removeDups(data, titleCol, false);
-      dupTitle = r2.removed; data = r2.kept;
-    }
-    // Step 3: deduplicate by resumo fingerprint (catches same article with slightly diff title)
-    if (resumoCol && resumoCol !== keyCol && resumoCol !== titleCol) {
-      const r3 = removeDups(data, resumoCol, true);
-      dupResumo = r3.removed; data = r3.kept;
-    }
-  }
-
-  // Track removed rows with reason during dedup passes
-  function removeDupsTracked(arr, col, useShort, reason) {
-    if (!col) return { kept: arr, removed: 0, removedRows: [] };
-    const seen = new Map(), bad = new Set(), removedRows = [];
-    const work = keepWhich === 'last' ? [...arr].reverse() : arr;
-    work.forEach(row => {
-      const k = useShort ? normResumo(row[col]) : norm(row[col]);
-      if (!k || k==='nan' || k==='undefined' || k==='null' || k.length < 3) return;
-      if (seen.has(k)) { bad.add(row._i); removedRows.push({ row, reason }); }
+      const k = keyFn(row);
+      if (!k) return;
+      if (seen.has(k)) { if (!bad.has(row._i)) { bad.add(row._i); removedRows.push({ row, reason }); } }
       else seen.set(k, true);
     });
-    return { kept: arr.filter(r => !bad.has(r._i)), removed: bad.size, removedRows };
   }
 
-  // Re-run with tracking (results same as before but now we capture removed rows)
-  let tracked = rows.map((r,i) => ({...r, _i: i}));
-  const t1 = removeDupsTracked(tracked, keyCol, false, 'DOI/ID duplicado');
-  tracked = t1.kept;
-  const t2 = (alsoTitle && titleCol && titleCol !== keyCol)
-    ? removeDupsTracked(tracked, titleCol, false, 'Título duplicado')
-    : { kept: tracked, removed: 0, removedRows: [] };
-  tracked = t2.kept;
-  const t3 = (alsoTitle && resumoCol && resumoCol !== keyCol && resumoCol !== titleCol)
-    ? removeDupsTracked(tracked, resumoCol, true, 'Resumo duplicado')
-    : { kept: tracked, removed: 0, removedRows: [] };
+  // Pass 1: Título AND DOI both equal (exact duplicates — always remove)
+  if (keyCol && titleCol) {
+    markDups(indexed, row => {
+      const d = norm(row[keyCol]), t = norm(row[titleCol]);
+      if (empty(d) || empty(t)) return null;
+      return d + '|||' + t;
+    }, 'Título + DOI idênticos');
+  }
 
-  const removedRows = [...t1.removedRows, ...t2.removedRows, ...t3.removedRows]
-    .map(item => { const r = {...item.row}; delete r._i; return { row: r, reason: item.reason }; });
+  const remaining = () => indexed.filter(r => !bad.has(r._i));
 
-  const clean = data.map(r => { const x={...r}; delete x._i; return x; });
-  return { clean, dupKey, dupTitle, dupResumo, keyCol, titleCol, resumoCol, removedRows };
+  // Pass 2: DOI equal alone (strong signal)
+  if (keyCol) {
+    markDups(remaining(), row => {
+      const k = norm(row[keyCol]);
+      return empty(k) ? null : k;
+    }, 'DOI/ID duplicado');
+  }
+
+  // Pass 3 (optional): Título equal alone
+  if (alsoSep && titleCol) {
+    markDups(remaining(), row => {
+      const k = norm(row[titleCol]);
+      return empty(k) ? null : k;
+    }, 'Título duplicado');
+  }
+
+  // Pass 4 (optional): Resumo fingerprint
+  if (alsoSep && resumoCol) {
+    markDups(remaining(), row => {
+      const k = normResumo(row[resumoCol]);
+      return k.length < 10 ? null : k;
+    }, 'Resumo duplicado');
+  }
+
+  const clean       = indexed.filter(r => !bad.has(r._i)).map(r => { const x={...r}; delete x._i; return x; });
+  const dupKey      = removedRows.filter(x => x.reason==='DOI/ID duplicado').length;
+  const dupTitle    = removedRows.filter(x => x.reason==='Título duplicado').length;
+  const dupResumo   = removedRows.filter(x => x.reason==='Resumo duplicado').length;
+  const dupBoth     = removedRows.filter(x => x.reason==='Título + DOI idênticos').length;
+  const cleanedRows = removedRows.map(item => { const r={...item.row}; delete r._i; return { row:r, reason:item.reason }; });
+
+  return { clean, dupKey, dupTitle, dupResumo, dupBoth, keyCol, titleCol, resumoCol, removedRows: cleanedRows };
 }
 
 // ── AI via Google Apps Script ─────────────────────────────────────────────────
@@ -757,23 +754,99 @@ function removeFuzzyDup(prIdx, listIndices, itemIdx) {
   }
 }
 
-// ── Download Excel ────────────────────────────────────────────────────────────
-function downloadExcel(idx) {
+// ── Downloads ─────────────────────────────────────────────────────────────────
+function autoWidths(headers) {
+  return headers.map(h => ({ wch: Math.min(Math.max(String(h).length + 4, 12), 80) }));
+}
+
+function renumber(rows, headers) {
+  return rows.map((row, i) => {
+    const fk = headers[0];
+    if (fk && !isNaN(Number(row[fk]))) return { ...row, [fk]: i + 1 };
+    return row;
+  });
+}
+
+// 1. Clean file — only kept rows
+function downloadClean(idx) {
   const pr = processedResults[idx];
   if (!pr) return;
   const wb = XLSX.utils.book_new();
   pr.results.forEach(r => {
-    const rows = r.clean.map((row, i) => {
-      const keys = Object.keys(row);
-      const fk = keys[0];
-      if (fk && !isNaN(Number(row[fk]))) return { ...row, [fk]: i + 1 };
-      return row;
-    });
-    const ws = XLSX.utils.json_to_sheet(rows, { header: r.headers });
-    ws['!cols'] = r.headers.map(h => ({ wch: Math.min(Math.max(h.length + 4, 12), 60) }));
+    const ws = XLSX.utils.json_to_sheet(renumber(r.clean, r.headers), { header: r.headers });
+    ws['!cols'] = autoWidths(r.headers);
     XLSX.utils.book_append_sheet(wb, ws, r.sheetName.substring(0, 31));
   });
-  XLSX.writeFile(wb, pr.file.name.replace(/\.xlsx?$/i,'') + '_sem_duplicatas.xlsx');
+  XLSX.writeFile(wb, pr.file.name.replace(/\.xlsx?$/i,'') + '_limpa.xlsx');
+}
+
+// 2. Duplicates list — for PRISMA reporting
+function downloadDuplicates(idx) {
+  const pr = processedResults[idx];
+  if (!pr) return;
+  const allRemoved = pr.results.flatMap(r => r.removedRows || []);
+  if (!allRemoved.length) { alert('Nenhum duplicado encontrado.'); return; }
+
+  const titleCol = pr.results[0]?.titleCol || '';
+  const keyCol   = pr.results[0]?.keyCol   || '';
+  const headers  = ['Nº', 'Título', 'DOI / ID', 'Motivo de exclusão'];
+  const rows = allRemoved.map((item, i) => ({
+    'Nº': i + 1,
+    'Título': titleCol ? (item.row[titleCol] || '—') : '—',
+    'DOI / ID': keyCol ? (item.row[keyCol] || '—') : '—',
+    'Motivo de exclusão': item.reason
+  }));
+
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(rows, { header: headers });
+  ws['!cols'] = [{ wch: 6 }, { wch: 80 }, { wch: 35 }, { wch: 25 }];
+  XLSX.utils.book_append_sheet(wb, ws, 'Duplicados');
+
+  // Summary sheet
+  const reasons = {};
+  allRemoved.forEach(x => { reasons[x.reason] = (reasons[x.reason]||0)+1; });
+  const sumRows = [
+    { 'Critério': 'Total de registros originais', 'Quantidade': pr.results.reduce((a,r)=>a+r.original,0) },
+    { 'Critério': 'Total de duplicados removidos', 'Quantidade': allRemoved.length },
+    ...Object.entries(reasons).map(([k,v]) => ({ 'Critério': k, 'Quantidade': v })),
+    { 'Critério': 'Registros mantidos', 'Quantidade': pr.results.reduce((a,r)=>a+r.clean.length,0) }
+  ];
+  const ws2 = XLSX.utils.json_to_sheet(sumRows, { header: ['Critério','Quantidade'] });
+  ws2['!cols'] = [{ wch: 35 }, { wch: 15 }];
+  XLSX.utils.book_append_sheet(wb, ws2, 'Resumo PRISMA');
+
+  XLSX.writeFile(wb, pr.file.name.replace(/\.xlsx?$/i,'') + '_duplicados_PRISMA.xlsx');
+}
+
+// 3. Full file — all rows with STATUS column
+function downloadFull(idx) {
+  const pr = processedResults[idx];
+  if (!pr) return;
+  const wb = XLSX.utils.book_new();
+  pr.results.forEach(r => {
+    const removedMap = new Map();
+    (r.removedRows||[]).forEach(item => {
+      const titleCol = r.titleCol || '';
+      const keyCol   = r.keyCol   || '';
+      const k = (titleCol ? (item.row[titleCol]||'') : '') + '|||' + (keyCol ? (item.row[keyCol]||'') : '');
+      removedMap.set(k, item.reason);
+    });
+
+    // Rebuild original rows with STATUS
+    const allRows = [
+      ...r.clean.map(row => ({ ...row, 'STATUS_DEDUP': 'Incluído' })),
+      ...(r.removedRows||[]).map(item => ({ ...item.row, 'STATUS_DEDUP': 'Excluído — ' + item.reason }))
+    ];
+    // Sort by original order if first col is numeric
+    const fk = r.headers[0];
+    if (fk) allRows.sort((a,b) => (Number(a[fk])||0) - (Number(b[fk])||0));
+
+    const fullHeaders = [...r.headers, 'STATUS_DEDUP'];
+    const ws = XLSX.utils.json_to_sheet(allRows, { header: fullHeaders });
+    ws['!cols'] = autoWidths(fullHeaders);
+    XLSX.utils.book_append_sheet(wb, ws, r.sheetName.substring(0, 31));
+  });
+  XLSX.writeFile(wb, pr.file.name.replace(/\.xlsx?$/i,'') + '_completa_com_status.xlsx');
 }
 
 // ── Run ───────────────────────────────────────────────────────────────────────
@@ -793,8 +866,8 @@ async function runDedup() {
             const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval: '' });
             if (!rows.length) return null;
             const headers = Object.keys(rows[0]);
-            const { clean, dupKey, dupTitle, dupResumo, keyCol, titleCol, resumoCol, removedRows } = deduplicate(rows, headers);
-            return { sheetName, original: rows.length, clean, dupKey, dupTitle, dupResumo, keyCol, titleCol, resumoCol, headers, removedRows };
+            const { clean, dupKey, dupTitle, dupResumo, dupBoth, keyCol, titleCol, resumoCol, removedRows } = deduplicate(rows, headers);
+            return { sheetName, original: rows.length, clean, dupKey, dupTitle, dupResumo, dupBoth, keyCol, titleCol, resumoCol, headers, removedRows };
           }).filter(Boolean);
           res({ file: f, results });
         } catch(err) { rej(err); }
@@ -827,11 +900,13 @@ async function runDedup() {
 function buildBlock(pr, idx) {
   const { file, results } = pr;
   const tOrig   = results.reduce((a,r) => a+r.original, 0);
+  const tDupBoth= results.reduce((a,r) => a+(r.dupBoth||0), 0);
   const tDupKey = results.reduce((a,r) => a+r.dupKey, 0);
   const tDupTit = results.reduce((a,r) => a+r.dupTitle, 0);
   const tDupRes = results.reduce((a,r) => a+(r.dupResumo||0), 0);
-  const tKept   = tOrig - tDupKey - tDupTit - tDupRes;
-  const pct     = tOrig ? Math.round((tDupKey+tDupTit+tDupRes)/tOrig*100) : 0;
+  const tRemoved= tDupBoth + tDupKey + tDupTit + tDupRes;
+  const tKept   = tOrig - tRemoved;
+  const pct     = tOrig ? Math.round(tRemoved/tOrig*100) : 0;
   const wrap    = document.createElement('div');
   wrap.className = 'card';
   wrap.style.marginBottom = '18px';
@@ -845,9 +920,9 @@ function buildBlock(pr, idx) {
     <div class="card-b">
       <div class="stats-grid" style="grid-template-columns:repeat(5,1fr)">
         <div class="stat"><div class="stat-val">${tOrig}</div><div class="stat-lbl">Originais</div></div>
-        <div class="stat"><div class="stat-val r">−${tDupKey}</div><div class="stat-lbl">Dup. por ${results[0]?.keyCol||'chave'}</div></div>
-        <div class="stat"><div class="stat-val r">−${tDupTit}</div><div class="stat-lbl">Dup. por título</div></div>
-        <div class="stat"><div class="stat-val r">−${tDupRes}</div><div class="stat-lbl">Dup. por resumo</div></div>
+        <div class="stat"><div class="stat-val r">−${tDupBoth}</div><div class="stat-lbl">Tít.+DOI iguais</div></div>
+        <div class="stat"><div class="stat-val r">−${tDupKey+tDupTit+tDupRes}</div><div class="stat-lbl">Outros critérios</div></div>
+        <div class="stat"><div class="stat-val r">−${tDupBoth+tDupKey+tDupTit+tDupRes}</div><div class="stat-lbl">Total removidos</div></div>
         <div class="stat"><div class="stat-val g">${tKept}</div><div class="stat-lbl">Mantidos (−${pct}%)</div></div>
       </div>
       ${aiEnabled && localStorage.getItem('worker_url') ? `
@@ -859,10 +934,20 @@ function buildBlock(pr, idx) {
         <div class="ai-loading"><div class="spinner"></div>Analisando títulos…</div>
       </div>` : ''}
       ${renderRemovedList(pr, idx)}
-      <button class="dl-btn" onclick="downloadExcel(${idx})">
-        <svg viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-        Baixar Excel sem duplicatas
-      </button>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="dl-btn" onclick="downloadClean(${idx})">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+          Baixar planilha limpa
+        </button>
+        <button class="dl-btn" style="background:var(--green-dim);border-color:var(--border2)" onclick="downloadDuplicates(${idx})">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+          Baixar lista de duplicados (PRISMA)
+        </button>
+        <button class="dl-btn" style="background:var(--green-dim);border-color:var(--border2)" onclick="downloadFull(${idx})">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+          Baixar planilha completa (com status)
+        </button>
+      </div>
     </div>`;
   return wrap;
 }
