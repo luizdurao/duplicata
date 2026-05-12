@@ -252,7 +252,7 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
     <div class="ph">
       <div class="eyebrow">Ferramenta de dados</div>
       <div class="ptitle">Deduplicador de Planilhas</div>
-      <p class="pdesc">Carregue arquivos .xlsx, elimine duplicatas por DOI e título, e baixe o arquivo limpo. A IA analisa os resultados automaticamente via proxy seguro.</p>
+      <p class="pdesc">Carregue arquivos .xlsx, identifique duplicatas por DOI e Título, e baixe a planilha com coluna de status preenchida — pronta para o PRISMA.</p>
     </div>
 
     <!-- Upload -->
@@ -309,11 +309,11 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
         </div>
         <div class="cb-row">
           <input type="checkbox" id="also-title" checked>
-          <span>Também remover quando apenas o Título coincide (DOI ausente ou diferente)</span>
+          <span>Também remover quando apenas o Título coincide (quando DOI está ausente)</span>
         </div>
         <div class="ai-toggle" onclick="toggleAI()" id="ai-toggle">
           <span class="ai-badge">IA</span>
-          <span class="ai-toggle-txt"><b>Análise com IA (Gemini)</b> — via Google Apps Script</span>
+          <span class="ai-toggle-txt"><b>Classificação de motivos com IA (Gemini)</b> — via Google Apps Script</span>
           <div class="sw on" id="ai-sw"><div class="knob"></div></div>
         </div>
         <div class="worker-warn" id="worker-warn" style="display:none">
@@ -516,9 +516,9 @@ function detectResumoCol(headers) {
 }
 function deduplicate(rows, headers) {
   const keepWhich = document.getElementById('keep-which').value;
-  const alsoSep   = document.getElementById('also-title').checked; // also remove by título OR doi separately
-  const keyCol    = detectKeyCol(headers);   // DOI/PMID/ID col
-  const titleCol  = detectTitleCol(headers); // Título col
+  const alsoTitle = document.getElementById('also-title').checked;
+  const keyCol    = detectKeyCol(headers);
+  const titleCol  = detectTitleCol(headers);
   const resumoCol = detectResumoCol(headers);
 
   const norm = v => v == null ? '' : v.toString().trim().toLowerCase()
@@ -529,7 +529,6 @@ function deduplicate(rows, headers) {
   const bad = new Set();
   const removedRows = [];
 
-  // Helper: mark duplicates and record reason
   function markDups(arr, keyFn, reason) {
     const seen = new Map();
     const work = keepWhich === 'last' ? [...arr].reverse() : arr;
@@ -541,43 +540,36 @@ function deduplicate(rows, headers) {
     });
   }
 
-  // Pass 1: Título AND DOI both equal (exact duplicates — always remove)
-  if (keyCol && titleCol) {
-    markDups(indexed, row => {
-      const d = norm(row[keyCol]), t = norm(row[titleCol]);
-      if (empty(d) || empty(t)) return null;
-      return d + '|||' + t;
-    }, 'Título + DOI idênticos');
-  }
-
   const remaining = () => indexed.filter(r => !bad.has(r._i));
 
-  // Pass 2: DOI equal alone (strong signal)
+  // Pass 1: DOI idêntico (critério mais forte)
   if (keyCol) {
-    markDups(remaining(), row => {
+    markDups(indexed, row => {
       const k = norm(row[keyCol]);
       return empty(k) ? null : k;
-    }, 'DOI/ID duplicado');
+    }, 'duplicado');
   }
 
-  // Pass 3 (optional): Título equal alone
-  if (alsoSep && titleCol) {
+  // Pass 2: Título idêntico (sempre ativo — principal critério quando DOI está ausente)
+  if (titleCol) {
     markDups(remaining(), row => {
       const k = norm(row[titleCol]);
       return empty(k) ? null : k;
-    }, 'Título duplicado');
+    }, 'duplicado');
   }
 
-  // Pass 4 (resumo) removido — muito impreciso
-
-  const clean       = indexed.filter(r => !bad.has(r._i)).map(r => { const x={...r}; delete x._i; return x; });
-  const dupKey      = removedRows.filter(x => x.reason==='DOI/ID duplicado').length;
-  const dupTitle    = removedRows.filter(x => x.reason==='Título duplicado').length;
-  const dupResumo   = 0; // desativado
-  const dupBoth     = removedRows.filter(x => x.reason==='Título + DOI idênticos').length;
+  const clean    = indexed.filter(r => !bad.has(r._i)).map(r => { const x={...r}; delete x._i; return x; });
+  const dupDOI   = removedRows.filter((x,i,a) => {
+    // Count DOI dups: rows where DOI is not empty and was the reason
+    const doiVal = norm(x.row[keyCol] || '');
+    return !empty(doiVal);
+  }).length;
+  const dupTitle2 = removedRows.length - dupDOI;
+  const dupResumo = 0;
+  const dupBoth   = 0;
   const cleanedRows = removedRows.map(item => { const r={...item.row}; delete r._i; return { row:r, reason:item.reason }; });
 
-  return { clean, dupKey, dupTitle, dupResumo, dupBoth, keyCol, titleCol, resumoCol, removedRows: cleanedRows };
+  return { clean, dupKey: dupDOI, dupTitle: dupTitle2, dupResumo, dupBoth, keyCol, titleCol, resumoCol, removedRows: cleanedRows };
 }
 
 // ── AI via Google Apps Script ─────────────────────────────────────────────────
@@ -615,25 +607,29 @@ async function getAIAnalysis(pr) {
 }
 
 async function getFuzzyDuplicates(pr) {
-  let titleCol = pr.results[0]?.titleCol;
+  let titleCol  = pr.results[0]?.titleCol;
+  let resumoCol = pr.results[0]?.resumoCol;
   if (!titleCol && pr.results[0]?.headers?.length >= 4) titleCol = pr.results[0].headers[3];
   if (!titleCol) throw new Error('Coluna de título não detectada.');
 
-  // Build flat list with original row index preserved
+  // Send clean rows (not yet excluded) for motivo classification
   const allRows = pr.results.flatMap(r => r.clean);
   const indexed = allRows
-    .map((row, i) => ({ i, t: titleCol ? (row[titleCol] || '') : (Object.values(row)[3] || '') }))
-    .filter(x => x.t.trim())
-    .slice(0, 150);
+    .map((row, i) => ({
+      i,
+      titulo:  titleCol  ? (row[titleCol]  || '') : '',
+      resumo:  resumoCol ? (row[resumoCol] || '').substring(0, 400) : ''
+    }))
+    .filter(x => x.titulo.trim())
+    .slice(0, 80); // limit for speed
 
-  if (indexed.length < 2) throw new Error('Poucos títulos para análise.');
+  if (!indexed.length) throw new Error('Nenhum artigo para classificar.');
 
-  // Store mapping: position in sent list → original allRows index
   pr._fuzzyMap = indexed.map(x => x.i);
 
-  const titles = indexed.map(x => x.t);
-  const data = await callScript({ mode: 'fuzzy', titles });
-  return data.fuzzy;
+  const articles = indexed.map(x => ({ titulo: x.titulo, resumo: x.resumo }));
+  const data = await callScript({ mode: 'classify', articles });
+  return data.classifications;
 }
 
 // ── Render removed rows list ─────────────────────────────────────────────────
@@ -676,70 +672,74 @@ function getTitleCol(pr) {
   return col;
 }
 
-function renderFuzzyResults(box, fuzzy, pr, idx) {
-  if (!fuzzy || !fuzzy.duplicatas || !fuzzy.duplicatas.length) {
-    box.innerHTML =
-      '<div class="fuzzy-box-h"><span class="fuzzy-badge">IA Fuzzy</span>' +
-      '<span class="ai-box-title">Nenhuma duplicata adicional identificada</span></div>' +
-      (fuzzy && fuzzy.observacao ? '<div class="fuzzy-obs">' + fuzzy.observacao + '</div>' : '');
+const MOTIVO_CLS = {
+  'duplicado':'doi','idioma':'doi','animais':'doi','editorial':'doi',
+  'errata':'doi','proceedings':'doi','consenso':'doi','fase i':'doi','fase1':'doi','in vitro':'doi',
+  'resumo':'titulo','protocolo':'titulo','relato de caso':'titulo','outro tipo de revisão':'titulo','outro tipo revisão':'titulo',
+  'observacional':'resumo','população':'resumo','desfechos':'resumo','intervenção':'resumo','comparador':'resumo'
+};
+function motivoCls(m) { return MOTIVO_CLS[(m||'').toLowerCase().trim()] || 'titulo'; }
+
+function renderFuzzyResults(box, classifications, pr, idx) {
+  if (!classifications || !classifications.length) {
+    box.innerHTML = '<div class="fuzzy-box-h"><span class="fuzzy-badge">IA</span><span class="ai-box-title">Nenhuma sugestão de exclusão adicional</span></div>';
     return;
   }
-
-  const { duplicatas, total_suspeitos, observacao } = fuzzy;
   const titleCol = getTitleCol(pr);
   const allRows  = pr.results.flatMap(r => r.clean);
-  const n = total_suspeitos;
-
-  let html =
-    '<div class="fuzzy-box-h">' +
-      '<span class="fuzzy-badge">IA Fuzzy</span>' +
-      '<span class="ai-box-title">' + n + ' possível' + (n !== 1 ? 'is' : '') +
-      ' duplicata' + (n !== 1 ? 's' : '') + ' adicional' + (n !== 1 ? 'is' : '') + ' — revise e remova</span>' +
-    '</div>';
-
-  // Map AI's list-indices back to real allRows indices
   const fuzzyMap = pr._fuzzyMap || null;
-
-  duplicatas.forEach((dup, di) => {
-    const rows_html = dup.indices.map(listIdx => {
-      const realIdx = fuzzyMap ? (fuzzyMap[listIdx] ?? listIdx) : listIdx;
-      const row = allRows[realIdx];
-      const title = row ? (titleCol ? (row[titleCol] || '—') : (Object.values(row)[3] || '—')) : '(índice ' + listIdx + ' inválido)';
-      return '<tr><td class="fuzzy-idx">' + (realIdx + 1) + '</td><td class="fuzzy-title-cell">' + title + '</td></tr>';
-    }).join('');
-
+  const toExclude = classifications.filter(c => {
+    const m = (c.motivo||'').toLowerCase().trim();
+    return m && !['incluir','incluído','incluido','manter','sem motivo'].some(x => m.includes(x));
+  });
+  if (!toExclude.length) {
+    box.innerHTML = '<div class="fuzzy-box-h"><span class="fuzzy-badge">IA</span><span class="ai-box-title">IA não sugeriu exclusões adicionais nos artigos analisados</span></div>';
+    return;
+  }
+  let html = '<div class="fuzzy-box-h"><span class="fuzzy-badge">IA</span><span class="ai-box-title">IA sugeriu ' + toExclude.length + ' exclusão' + (toExclude.length!==1?'ões':'') + ' — revise e aplique</span></div>';
+  toExclude.forEach((item, di) => {
+    const realIdx = fuzzyMap ? (fuzzyMap[item.index] ?? item.index) : item.index;
+    const row = allRows[realIdx];
+    const title = row ? (titleCol ? (row[titleCol]||'—') : '—') : '—';
+    const cls = motivoCls(item.motivo||'');
     html +=
       '<div class="fuzzy-item" id="fuzzy-item-' + idx + '-' + di + '">' +
         '<div class="fuzzy-item-info">' +
-          '<div class="fuzzy-motivo">⚠ ' + dup.motivo + '</div>' +
-          '<table class="fuzzy-table">' +
-            '<thead><tr><th>#</th><th>Título</th></tr></thead>' +
-            '<tbody>' + rows_html + '</tbody>' +
-          '</table>' +
+          '<div class="fuzzy-title-cell" style="font-size:12px;margin-bottom:6px">' + title + '</div>' +
+          '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
+            '<span class="removed-reason ' + cls + '">' + (item.motivo||'?') + '</span>' +
+            (item.justificativa ? '<span style="font-size:11px;color:var(--text3);font-style:italic">' + item.justificativa + '</span>' : '') +
+          '</div>' +
         '</div>' +
-        '<button class="fuzzy-rm-btn" onclick="removeFuzzyDup(' + idx + ',' + JSON.stringify(dup.indices) + ',' + di + ')">Remover duplicata</button>' +
+        '<button class="fuzzy-rm-btn" onclick="applyIAExclusion(' + idx + ',' + realIdx + ',' + di + ','' + (item.motivo||'').replace(/'/g,"\'") + '')">Aplicar exclusão</button>' +
       '</div>';
   });
-
-  if (observacao) html += '<div class="fuzzy-obs">' + observacao + '</div>';
   box.innerHTML = html;
 }
 
-function removeFuzzyDup(prIdx, listIndices, itemIdx) {
+function applyIAExclusion(prIdx, realIdx, itemIdx, motivo) {
   const pr = processedResults[prIdx];
   if (!pr) return;
-  // Map list indices → real row indices
-  const fuzzyMap = pr._fuzzyMap || null;
-  const realIndices = listIndices.map(li => fuzzyMap ? (fuzzyMap[li] ?? li) : li);
-  const toRemove = new Set(realIndices.slice(1)); // keep first, remove rest
-  let offset = 0;
+  let offset = 0, found = false;
   pr.results.forEach(r => {
     const len = r.clean.length;
-    r.clean = r.clean.filter((_, i) => !toRemove.has(offset + i));
+    const li = realIdx - offset;
+    if (!found && li >= 0 && li < len) {
+      const row = r.clean[li];
+      r.clean.splice(li, 1);
+      if (!r.removedRows) r.removedRows = [];
+      r.removedRows.push({ row, reason: motivo });
+      found = true;
+    }
     offset += len;
   });
-  const btn = document.querySelector('#fuzzy-item-' + prIdx + '-' + itemIdx + ' .fuzzy-rm-btn');
-  if (btn) { btn.textContent = '✓ Removida'; btn.className = 'fuzzy-rm-btn removed'; btn.disabled = true; }
+  const item = document.querySelector('#fuzzy-item-' + prIdx + '-' + itemIdx);
+  if (item) {
+    item.style.opacity = '0.4';
+    const btn = item.querySelector('.fuzzy-rm-btn');
+    if (btn) { btn.textContent = '✓ Aplicado'; btn.className = 'fuzzy-rm-btn removed'; btn.disabled = true; }
+  }
+  // Update kept count
   const cards = document.querySelectorAll('#results .card');
   if (cards[prIdx]) {
     const kept = cards[prIdx].querySelectorAll('.stat-val.g')[0];
@@ -811,35 +811,58 @@ function downloadDuplicates(idx) {
   XLSX.writeFile(wb, pr.file.name.replace(/\.xlsx?$/i,'') + '_duplicados_PRISMA.xlsx');
 }
 
-// 3. Full file — all rows with STATUS column
+// 3. Full file — all rows, duplicates marked with 'Motivo de exclusão' = 'duplicado'
+// Mirrors the format of the model spreadsheet
 function downloadFull(idx) {
   const pr = processedResults[idx];
   if (!pr) return;
   const wb = XLSX.utils.book_new();
   pr.results.forEach(r => {
-    const removedMap = new Map();
+    // Build a Set of clean row keys for fast lookup
+    const titleCol = r.titleCol || '';
+    const keyCol   = r.keyCol   || '';
+
+    // Map: identify removed rows by their original content
+    const removedSet = new Set();
     (r.removedRows||[]).forEach(item => {
-      const titleCol = r.titleCol || '';
-      const keyCol   = r.keyCol   || '';
-      const k = (titleCol ? (item.row[titleCol]||'') : '') + '|||' + (keyCol ? (item.row[keyCol]||'') : '');
-      removedMap.set(k, item.reason);
+      // Use title+doi as unique key
+      const t = titleCol ? (item.row[titleCol]||'') : '';
+      const d = keyCol   ? (item.row[keyCol]||'')   : '';
+      removedSet.add(t + '|||' + d);
     });
 
-    // Rebuild original rows with STATUS
+    // Find which headers are 'Status de inclusão' and 'Motivo de exclusão'
+    const normH = h => h.toString().trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,'');
+    const statusCol = r.headers.find(h => normH(h).includes('statusdeinclusao') || normH(h).includes('statusinc')) || null;
+    const motivoCol = r.headers.find(h => normH(h).includes('motivodeexclusao') || normH(h).includes('motivoexc')) || null;
+
+    // Rebuild all original rows (clean + removed) sorted by original index
     const allRows = [
-      ...r.clean.map(row => ({ ...row, 'STATUS_DEDUP': 'Incluído' })),
-      ...(r.removedRows||[]).map(item => ({ ...item.row, 'STATUS_DEDUP': 'Excluído — ' + item.reason }))
+      ...r.clean.map(row => ({...row})),
+      ...(r.removedRows||[]).map(item => ({...item.row}))
     ];
-    // Sort by original order if first col is numeric
+    // Sort by first numeric column (N)
     const fk = r.headers[0];
     if (fk) allRows.sort((a,b) => (Number(a[fk])||0) - (Number(b[fk])||0));
 
-    const fullHeaders = [...r.headers, 'STATUS_DEDUP'];
-    const ws = XLSX.utils.json_to_sheet(allRows, { header: fullHeaders });
-    ws['!cols'] = autoWidths(fullHeaders);
+    // Mark duplicates — fill 'Motivo de exclusão' = 'duplicado' and status = 'Excluído'
+    const markedRows = allRows.map(row => {
+      const t = titleCol ? (row[titleCol]||'') : '';
+      const d = keyCol   ? (row[keyCol]||'')   : '';
+      const isDup = removedSet.has(t + '|||' + d);
+      const out = {...row};
+      if (isDup) {
+        if (motivoCol) out[motivoCol] = 'duplicado';
+        if (statusCol) out[statusCol] = 'Excluído';
+      }
+      return out;
+    });
+
+    const ws = XLSX.utils.json_to_sheet(markedRows, { header: r.headers });
+    ws['!cols'] = autoWidths(r.headers);
     XLSX.utils.book_append_sheet(wb, ws, r.sheetName.substring(0, 31));
   });
-  XLSX.writeFile(wb, pr.file.name.replace(/\.xlsx?$/i,'') + '_completa_com_status.xlsx');
+  XLSX.writeFile(wb, pr.file.name.replace(/\.xlsx?$/i,'') + '_com_duplicados_marcados.xlsx');
 }
 
 // ── Run ───────────────────────────────────────────────────────────────────────
@@ -897,7 +920,7 @@ function buildBlock(pr, idx) {
   const tDupKey = results.reduce((a,r) => a+r.dupKey, 0);
   const tDupTit = results.reduce((a,r) => a+r.dupTitle, 0);
   const tDupRes = results.reduce((a,r) => a+(r.dupResumo||0), 0);
-  const tRemoved= tDupBoth + tDupKey + tDupTit;
+  const tRemoved= tDupKey + tDupTit;
   const tKept   = tOrig - tRemoved;
   const pct     = tOrig ? Math.round(tRemoved/tOrig*100) : 0;
   const wrap    = document.createElement('div');
@@ -913,17 +936,17 @@ function buildBlock(pr, idx) {
     <div class="card-b">
       <div class="stats-grid" style="grid-template-columns:repeat(4,1fr)">
         <div class="stat"><div class="stat-val">${tOrig}</div><div class="stat-lbl">Originais</div></div>
-        <div class="stat"><div class="stat-val r">−${tDupBoth}</div><div class="stat-lbl">Título + DOI iguais</div></div>
-        <div class="stat"><div class="stat-val r">−${tDupKey+tDupTit}</div><div class="stat-lbl">DOI ou Título sozinho</div></div>
+        <div class="stat"><div class="stat-val r">−${tDupKey}</div><div class="stat-lbl">Dup. por DOI</div></div>
+        <div class="stat"><div class="stat-val r">−${tDupTit}</div><div class="stat-lbl">Dup. por Título</div></div>
         <div class="stat"><div class="stat-val g">${tKept}</div><div class="stat-lbl">Mantidos (−${pct}%)</div></div>
       </div>
       ${aiEnabled && localStorage.getItem('worker_url') ? `
       <div class="fuzzy-box" id="fuzzy-${idx}">
         <div class="fuzzy-box-h">
           <span class="fuzzy-badge">IA Fuzzy</span>
-          <span class="ai-box-title">Buscando duplicatas adicionais com IA…</span>
+          <span class="ai-box-title">Classificando motivos de exclusão com IA…</span>
         </div>
-        <div class="ai-loading"><div class="spinner"></div>Analisando títulos…</div>
+        <div class="ai-loading"><div class="spinner"></div>Classificando artigos por motivo de exclusão…</div>
       </div>` : ''}
       ${renderRemovedList(pr, idx)}
       <div style="display:flex;gap:10px;flex-wrap:wrap">
@@ -937,7 +960,7 @@ function buildBlock(pr, idx) {
         </button>
         <button class="dl-btn" style="background:var(--green-dim);border-color:var(--border2)" onclick="downloadFull(${idx})">
           <svg viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-          Baixar planilha completa (com status)
+          Baixar planilha completa (duplicados marcados)
         </button>
       </div>
     </div>`;
