@@ -711,7 +711,7 @@ function renderFuzzyResults(box, classifications, pr, idx) {
             (item.justificativa ? '<span style="font-size:11px;color:var(--text3);font-style:italic">' + item.justificativa + '</span>' : '') +
           '</div>' +
         '</div>' +
-        '<button class="fuzzy-rm-btn" onclick="applyIAExclusion(' + idx + ',' + realIdx + ',' + di + ','' + (item.motivo||'').replace(/'/g,"\'") + '')">Aplicar exclusão</button>' +
+        '<button class="fuzzy-rm-btn" data-motivo="' + (item.motivo||'').replace(/"/g,'') + '" onclick="applyIAExclusion(' + idx + ',' + realIdx + ',' + di + ',this.dataset.motivo)">Aplicar exclusão</button>' +
       '</div>';
   });
   box.innerHTML = html;
