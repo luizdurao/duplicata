@@ -231,9 +231,9 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
           <circle cx="10" cy="10" r="8"/><path d="M10 6v4l3 3"/>
         </svg>
       </div>
-      <span class="logo-txt">Origin <span>Health</span></span>
+      <span class="logo-txt">Origin <span>Health v14</span></span>
     </div>
-    <h1>Acesso à plataforma v13</h1>
+    <h1>Acesso à plataforma</h1>
     <p class="sub">Ferramentas de inteligência para pesquisa em saúde</p>
     <div class="field">
       <label>E-mail</label>
@@ -672,12 +672,12 @@ async function getFuzzyDuplicates(pr) {
   const allRows = pr.results.flatMap(r => r.clean);
 
   // Send in batches of 60 for speed/token limits
-  const BATCH = 30;
+  const BATCH = 20;
   pr._fuzzyMap = allRows.map((_, i) => i);
 
   const articles = allRows.map(row => ({
     titulo:  titleCol  ? (row[titleCol]  || '') : '',
-    resumo:  resumoCol ? ((row[resumoCol] || '').substring(0, 350)) : ''
+    resumo:  resumoCol ? ((row[resumoCol] || '').substring(0, 150)) : ''
   }));
 
   // If >60 articles, send first batch only and note limitation
