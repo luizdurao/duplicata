@@ -1,0 +1,8 @@
+# Ignore all Excel file formats
+*.xls
+*.xlsx
+*.xlsm
+*.xlsb
+
+# Ignore temporary/lock files created by Excel
+~$*

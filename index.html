@@ -230,6 +230,38 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
   .eleg-field textarea::placeholder{color:var(--text3)}
   .eleg-hint{font-size:11px;color:var(--text3);margin-top:5px}
 
+
+  /* ── MOTIVOS EDITOR ── */
+  .motivos-grid{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+  .motivo-tag{
+    display:flex;align-items:center;gap:6px;
+    padding:5px 10px;background:var(--bg3);
+    border:1px solid var(--border);border-radius:20px;
+    font-size:12px;color:var(--text2);
+  }
+  .motivo-tag.special{border-color:var(--green);color:var(--green);background:var(--green-dim)}
+  .motivo-tag-del{
+    cursor:pointer;color:var(--text3);font-size:14px;line-height:1;
+    transition:color .15s;background:none;border:none;padding:0
+  }
+  .motivo-tag-del:hover{color:var(--danger)}
+  .motivo-add-row{display:flex;gap:8px;margin-top:10px}
+  .motivo-add-row input{
+    flex:1;padding:8px 12px;background:var(--bg3);
+    border:1px solid var(--border);border-radius:var(--radius);
+    color:var(--text);font-family:'Inter',sans-serif;font-size:13px;outline:none;
+    transition:border-color .2s
+  }
+  .motivo-add-row input:focus{border-color:var(--green)}
+  .motivo-add-row input::placeholder{color:var(--text3)}
+  .btn-add-motivo{
+    padding:8px 16px;background:var(--green-dim);border:1px solid var(--border2);
+    border-radius:var(--radius);color:var(--green);font-size:12px;font-weight:600;
+    cursor:pointer;white-space:nowrap;transition:all .2s
+  }
+  .btn-add-motivo:hover{background:var(--green);color:#080c0b}
+  .motivos-hint{font-size:11px;color:var(--text3);margin-top:8px}
+
 </style>
 </head>
 <body>
@@ -245,7 +277,7 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
           <circle cx="10" cy="10" r="8"/><path d="M10 6v4l3 3"/>
         </svg>
       </div>
-      <span class="logo-txt">Origin <span>Health v19</span></span>
+      <span class="logo-txt">Origin <span>Health v20</span></span>
     </div>
     <h1>Acesso à plataforma</h1>
     <p class="sub">Ferramentas de inteligência para pesquisa em saúde</p>
@@ -362,6 +394,15 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
           <input type="checkbox" id="also-title" checked>
           <span>Também remover quando apenas o Título coincide (quando DOI está ausente)</span>
         </div>
+        <div style="margin-top:14px">
+          <div style="font-size:10px;font-weight:500;color:var(--text2);letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px">Motivos de exclusão</div>
+          <div class="motivos-grid" id="motivos-tags"></div>
+          <div class="motivo-add-row">
+            <input type="text" id="motivo-new" placeholder="Novo motivo..." onkeydown="if(event.key==='Enter')addMotivo()">
+            <button class="btn-add-motivo" onclick="addMotivo()">+ Adicionar</button>
+          </div>
+          <div class="motivos-hint">Os motivos <b style="color:var(--green)">incluir</b> e <b style="color:var(--green)">duplicado</b> são fixos. Adicione ou remova os demais conforme o protocolo da revisão.</div>
+        </div>
         <div class="ai-toggle" onclick="toggleAI()" id="ai-toggle">
           <span class="ai-badge">IA</span>
           <span class="ai-toggle-txt"><b>Classificação de motivos com IA (Gemini)</b> — via Google Apps Script</span>
@@ -369,7 +410,7 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
         </div>
         <div class="eleg-field" id="eleg-field">
           <label>Critério de elegibilidade (PICO da revisão)</label>
-          <textarea id="eleg-text" placeholder="Descreva o PICO da sua revisão para guiar a IA na classificação.&#10;&#10;Exemplo: ECRs com P-CAB (tegoprazan, vonoprazan) vs IBP em adultos com DRGE, úlcera péptica ou erradicação de H. pylori. Desfechos: cura endoscópica, alívio sintomático, taxa de erradicação."></textarea>
+          <textarea id="eleg-text" oninput="localStorage.setItem('eleg_text',this.value)" placeholder="Cole aqui o critério de elegibilidade da sua revisão..."></textarea>
           <div class="eleg-hint">A IA usará esse critério para classificar cada artigo como incluir ou excluir.</div>
         </div>
         <div class="worker-warn" id="worker-warn" style="display:none">
@@ -478,6 +519,12 @@ function doLogin() {
       document.getElementById('login').style.display = 'none';
       document.getElementById('app').style.display = 'flex';
       document.getElementById('nav-user').textContent = email;
+      renderMotivosEditor();
+      // Set default elegibility text if empty
+      const elegEl = document.getElementById('eleg-text');
+      if (elegEl && !elegEl.value.trim()) {
+        elegEl.value = localStorage.getItem('eleg_text') || '';
+      }
     } else {
       err.style.display = 'block';
     }
@@ -531,6 +578,7 @@ function renderFiles() {
     list.appendChild(d);
   });
   document.getElementById('cfg-card').style.display = files.length ? 'block' : 'none';
+  if (files.length) renderMotivosEditor();
   document.getElementById('run-btn').disabled = files.length === 0;
 }
 function removeFile(i) { files.splice(i, 1); renderFiles(); }
@@ -600,28 +648,20 @@ function deduplicate(rows, headers) {
 
   const remaining = () => indexed.filter(r => !bad.has(r._i));
 
-  // Pass 1: DOI + título fuzzy juntos (evita falsos positivos de proceedings com DOI compartilhado)
-  // Só remove por DOI quando o título também começa igual (primeiros 40 chars)
+  // Pass 1: DOI + título iguais juntos
+  // Só marca como duplicata quando DOI E título (completo normalizado) são idênticos
+  // Evita falsos positivos de proceedings/suplementos que compartilham DOI do fascículo
   if (keyCol && titleCol) {
     markDups(indexed, row => {
       const d = norm(row[keyCol]);
       const t = norm(row[titleCol]);
       if (empty(d) || t.length < 10) return null;
-      // Use DOI as key only when titles also share first 40 chars (same article, different DB)
-      return d;
+      return d + '|||' + t; // chave combinada: só duplicata quando AMBOS são iguais
     }, 'duplicado');
   }
 
-  // Pass 2: DOI exato sozinho (quando título não disponível)
-  if (keyCol && !titleCol) {
-    markDups(indexed, row => {
-      const k = norm(row[keyCol]);
-      return empty(k) ? null : k;
-    }, 'duplicado');
-  }
-
-  // Pass 3: Título fuzzy — primeiros 80 chars normalizados
-  // Detecta duplicatas cross-database (mesmo artigo no PubMed e Embase)
+  // Pass 2: Título exato normalizado (sem DOI)
+  // Detecta o mesmo artigo indexado em duas bases com título idêntico
   if (titleCol) {
     markDups(remaining(), row => {
       const k = norm(row[titleCol]);
@@ -707,7 +747,8 @@ async function getFuzzyDuplicates(pr) {
     if (progressEl) progressEl.textContent = 'Classificando artigos ' + (start+1) + '–' + Math.min(start+BATCH, total) + ' de ' + total + '…';
 
     const elegText = (document.getElementById('eleg-text')?.value || '').trim();
-    const data = await callScript({ mode: 'classify', articles: batch, elegibilidade: elegText });
+    const motivosList = getMotivos().filter(m => m && m !== 'incluir' && m !== 'duplicado').join(', ');
+    const data = await callScript({ mode: 'classify', articles: batch, elegibilidade: elegText, motivos: motivosList });
     if (!data.classifications) throw new Error('Batch ' + start + ': ' + JSON.stringify(data).substring(0,150));
     data.classifications.forEach(c => {
       allClassifications.push({ ...c, index: c.index + start });
@@ -791,12 +832,52 @@ function detectStatusCol(headers) {
   return candidates.find(h => !h.toLowerCase().includes('isa')) || candidates[0] || null;
 }
 
-const MOTIVOS_LIST = [
-  '', 'incluir', 'duplicado', 'idioma', 'resumo', 'observacional', 'população',
-  'desfechos', 'intervenção', 'comparador', 'animais', 'in vitro',
-  'editorial', 'protocolo', 'relato de caso', 'outro tipo de revisão',
-  'fase I', 'errata', 'proceedings', 'consenso'
-];
+const DEFAULT_MOTIVOS = ['incluir','duplicado','idioma','resumo','observacional','população','desfechos','intervenção','comparador','animais','in vitro','editorial','protocolo','relato de caso','outro tipo de revisão','fase I','errata','proceedings','consenso'];
+
+function getMotivos() {
+  try {
+    const saved = localStorage.getItem('motivos_list');
+    if (saved) return ['', ...JSON.parse(saved)];
+  } catch(_) {}
+  return ['', ...DEFAULT_MOTIVOS];
+}
+
+function saveMotivos(list) {
+  localStorage.setItem('motivos_list', JSON.stringify(list.filter(m => m)));
+  renderMotivosEditor();
+}
+
+function renderMotivosEditor() {
+  const list = getMotivos().filter(m => m); // no empty
+  const container = document.getElementById('motivos-tags');
+  if (!container) return;
+  container.innerHTML = list.map(m => {
+    const special = m === 'incluir' || m === 'duplicado';
+    return '<span class="motivo-tag' + (special ? ' special' : '') + '">' +
+      m +
+      (special ? '' : '<button class="motivo-tag-del" onclick="removeMotivo(this.dataset.m)" data-m="' + m.replace(/"/g,'&quot;') + '" title="Remover">×</button>') +
+    '</span>';
+  }).join('');
+}
+
+function addMotivo() {
+  const inp = document.getElementById('motivo-new');
+  if (!inp) return;
+  const val = inp.value.trim().toLowerCase();
+  if (!val) return;
+  const current = getMotivos().filter(m => m);
+  if (current.includes(val)) { inp.value = ''; return; }
+  saveMotivos([...current, val]);
+  inp.value = '';
+}
+
+function removeMotivo(m) {
+  const current = getMotivos().filter(x => x && x !== m);
+  saveMotivos(current);
+}
+
+// MOTIVOS_LIST as dynamic function call
+const MOTIVOS_LIST = null; // unused — use getMotivos()
 
 // Store review state: prIdx → { rowIdx: { motivo, confirmed } }
 const reviewState = {};
@@ -835,7 +916,7 @@ function renderFuzzyResults(box, classifications, pr, idx) {
 }
 
 function renderReviewTable(idx, allRows, titleCol, entries, unconfirmed) {
-  const opts = MOTIVOS_LIST.map(m => {
+  const opts = getMotivos().map(m => {
     let label = m || '— selecionar —';
     if (m === 'incluir') label = '✓ INCLUIR no estudo';
     return '<option value="' + m + '">' + label + '</option>';
