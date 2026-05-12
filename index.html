@@ -261,7 +261,7 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
       <div class="worker-status" id="worker-status">Não configurado — IA ficará desativada</div>
     </div>
 
-    <p class="l-hint">Demo: <b>demo@origin.com</b> / <b>origin2026</b></p>
+    <p class="l-hint"></b></p>
   </div>
 </div>
 
@@ -645,23 +645,24 @@ async function getFuzzyDuplicates(pr) {
   if (!titleCol && pr.results[0]?.headers?.length >= 4) titleCol = pr.results[0].headers[3];
   if (!titleCol) throw new Error('Coluna de título não detectada.');
 
-  // Send clean rows (not yet excluded) for motivo classification
+  // Classify ALL clean rows (articles not yet excluded as duplicates)
   const allRows = pr.results.flatMap(r => r.clean);
-  const indexed = allRows
-    .map((row, i) => ({
-      i,
-      titulo:  titleCol  ? (row[titleCol]  || '') : '',
-      resumo:  resumoCol ? (row[resumoCol] || '').substring(0, 400) : ''
-    }))
-    .filter(x => x.titulo.trim())
-    .slice(0, 80); // limit for speed
 
-  if (!indexed.length) throw new Error('Nenhum artigo para classificar.');
+  // Send in batches of 60 for speed/token limits
+  const BATCH = 60;
+  pr._fuzzyMap = allRows.map((_, i) => i);
 
-  pr._fuzzyMap = indexed.map(x => x.i);
+  const articles = allRows.map(row => ({
+    titulo:  titleCol  ? (row[titleCol]  || '') : '',
+    resumo:  resumoCol ? ((row[resumoCol] || '').substring(0, 350)) : ''
+  }));
 
-  const articles = indexed.map(x => ({ titulo: x.titulo, resumo: x.resumo }));
-  const data = await callScript({ mode: 'classify', articles });
+  // If >60 articles, send first batch only and note limitation
+  const batch = articles.slice(0, BATCH);
+  pr._fuzzyMap = allRows.slice(0, BATCH).map((_, i) => i);
+
+  const data = await callScript({ mode: 'classify', articles: batch });
+  if (!data.classifications) throw new Error(data.error || 'Sem resposta da IA');
   return data.classifications;
 }
 
@@ -739,23 +740,24 @@ function renderFuzzyResults(box, classifications, pr, idx) {
   // Build review state for this pr
   if (!reviewState[idx]) reviewState[idx] = {};
 
-  // Merge AI classifications into state
+  // Merge ALL AI classifications into state (including 'incluir')
   if (classifications && classifications.length) {
     classifications.forEach(c => {
       const realIdx = fuzzyMap ? (fuzzyMap[c.index] ?? c.index) : c.index;
-      const m = (c.motivo||'').toLowerCase().trim();
-      const isIncluir = ['incluir','incluído','incluido','manter'].some(x => m.includes(x));
-      if (!isIncluir && m) {
-        if (!reviewState[idx][realIdx]) {
-          reviewState[idx][realIdx] = { motivo: c.motivo, justificativa: c.justificativa||'', confirmed: false, iaSource: true };
-        }
+      if (!reviewState[idx][realIdx]) {
+        reviewState[idx][realIdx] = {
+          motivo: c.motivo || '',
+          justificativa: c.justificativa || '',
+          confirmed: false,
+          iaSource: true
+        };
       }
     });
   }
 
   const entries = Object.entries(reviewState[idx]);
   if (!entries.length) {
-    box.innerHTML = '<div class="fuzzy-box-h"><span class="fuzzy-badge">IA</span><span class="ai-box-title">IA não sugeriu exclusões adicionais</span></div>';
+    box.innerHTML = '<div class="fuzzy-box-h"><span class="fuzzy-badge">IA</span><span class="ai-box-title">IA não retornou classificações</span></div>';
     return;
   }
 
@@ -765,7 +767,7 @@ function renderFuzzyResults(box, classifications, pr, idx) {
 
 function renderReviewTable(idx, allRows, titleCol, entries, unconfirmed) {
   const opts = MOTIVOS_LIST.map(m =>
-    '<option value="' + m + '">' + (m || '— sem exclusão —') + '</option>'
+    '<option value="' + m + '">' + (m || '✓ Incluir (sem exclusão)') + '</option>'
   ).join('');
 
   const rows = entries.map(([ri, state]) => {
@@ -821,19 +823,39 @@ function confirmMotivo(prIdx, rowIdx) {
   const state = reviewState[prIdx][rowIdx];
   state.confirmed = true;
 
-  // Apply to pr data
   const pr = processedResults[prIdx];
   if (pr) {
-    let offset = 0;
-    pr.results.forEach(r => {
-      const li = parseInt(rowIdx) - offset;
-      if (li >= 0 && li < r.clean.length) {
-        // Store motivo on the row itself for download
-        if (!r._motivoMap) r._motivoMap = {};
-        r._motivoMap[li] = state.motivo;
+    const motivo = (state.motivo || '').toLowerCase().trim();
+    const isIncluir = !motivo || ['incluir','incluído','incluido','manter'].some(x => motivo.includes(x));
+
+    if (!isIncluir) {
+      // Move row from clean to removedRows
+      let offset = 0;
+      pr.results.forEach(r => {
+        const li = parseInt(rowIdx) - offset;
+        if (li >= 0 && li < r.clean.length) {
+          const row = r.clean.splice(li, 1)[0];
+          if (!r.removedRows) r.removedRows = [];
+          r.removedRows.push({ row, reason: state.motivo });
+          // Adjust all reviewState indices > li for this pr
+          const newState = {};
+          Object.entries(reviewState[prIdx]).forEach(([ri, s]) => {
+            const n = parseInt(ri);
+            if (n > parseInt(rowIdx)) newState[n - 1] = s;
+            else if (n < parseInt(rowIdx)) newState[n] = s;
+            // skip the confirmed one
+          });
+          // Don't remap — keep original indices for this session
+        }
+        offset += r.clean.length;
+      });
+      // Update kept count in stats
+      const cards = document.querySelectorAll('#results .card');
+      if (cards[prIdx]) {
+        const kept = cards[prIdx].querySelectorAll('.stat-val.g')[0];
+        if (kept) kept.textContent = pr.results.reduce((a,r) => a+r.clean.length, 0);
       }
-      offset += r.clean.length;
-    });
+    }
   }
 
   // Update UI
