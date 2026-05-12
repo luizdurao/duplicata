@@ -231,7 +231,7 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
           <circle cx="10" cy="10" r="8"/><path d="M10 6v4l3 3"/>
         </svg>
       </div>
-      <span class="logo-txt">Origin <span>Health v17</span></span>
+      <span class="logo-txt">Origin <span>Health v18</span></span>
     </div>
     <h1>Acesso à plataforma</h1>
     <p class="sub">Ferramentas de inteligência para pesquisa em saúde</p>
@@ -868,17 +868,11 @@ function confirmMotivo(prIdx, rowIdx) {
         const li = parseInt(rowIdx) - offset;
         if (li >= 0 && li < r.clean.length) {
           const row = r.clean.splice(li, 1)[0];
+          // Save title to reviewState for reliable download lookup
+          const titleCol = r.titleCol || (r.headers && r.headers[3]) || '';
+          if (titleCol) state._title = (row[titleCol] || '').trim().toLowerCase();
           if (!r.removedRows) r.removedRows = [];
           r.removedRows.push({ row, reason: state.motivo });
-          // Adjust all reviewState indices > li for this pr
-          const newState = {};
-          Object.entries(reviewState[prIdx]).forEach(([ri, s]) => {
-            const n = parseInt(ri);
-            if (n > parseInt(rowIdx)) newState[n - 1] = s;
-            else if (n < parseInt(rowIdx)) newState[n] = s;
-            // skip the confirmed one
-          });
-          // Don't remap — keep original indices for this session
         }
         offset += r.clean.length;
       });
@@ -1102,17 +1096,16 @@ function downloadFull(idx) {
       exclusionMap.set(t, { status: 'Excluído', motivo: item.reason || 'duplicado' });
     });
 
-    // Add IA-confirmed exclusions
+    // Add IA-confirmed exclusions — use saved _title for reliable lookup
     const iaState = reviewState[idx] || {};
     Object.entries(iaState).forEach(([ri, state]) => {
       if (!state.confirmed || !state.motivo) return;
       const m = (state.motivo||'').toLowerCase().trim();
       const isIncluir = !m || ['incluir','incluído','incluido','manter'].some(x => m.includes(x));
       if (isIncluir) return;
-      const row = r.clean[parseInt(ri)];
-      if (row && titleCol) {
-        const t = (row[titleCol]||'').trim().toLowerCase();
-        exclusionMap.set(t, { status: 'Excluído', motivo: state.motivo });
+      // Use _title saved during confirmMotivo (most reliable)
+      if (state._title) {
+        exclusionMap.set(state._title, { status: 'Excluído', motivo: state.motivo });
       }
     });
 
