@@ -309,7 +309,7 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
         </div>
         <div class="cb-row">
           <input type="checkbox" id="also-title" checked>
-          <span>Remover quando Título <b>ou</b> DOI coincidem (além de Título+DOI simultâneos)</span>
+          <span>Também remover quando apenas o Título coincide (DOI ausente ou diferente)</span>
         </div>
         <div class="ai-toggle" onclick="toggleAI()" id="ai-toggle">
           <span class="ai-badge">IA</span>
@@ -523,7 +523,6 @@ function deduplicate(rows, headers) {
 
   const norm = v => v == null ? '' : v.toString().trim().toLowerCase()
     .normalize('NFD').replace(/[\u0300-\u036f]/g,'');
-  const normResumo = v => norm(v).replace(/\s+/g,' ').substring(0, 120);
   const empty = v => { const k = norm(v); return !k || k==='nan' || k==='undefined' || k==='null' || k.length < 3; };
 
   const indexed = rows.map((r,i) => ({...r, _i: i}));
@@ -569,18 +568,12 @@ function deduplicate(rows, headers) {
     }, 'Título duplicado');
   }
 
-  // Pass 4 (optional): Resumo fingerprint
-  if (alsoSep && resumoCol) {
-    markDups(remaining(), row => {
-      const k = normResumo(row[resumoCol]);
-      return k.length < 10 ? null : k;
-    }, 'Resumo duplicado');
-  }
+  // Pass 4 (resumo) removido — muito impreciso
 
   const clean       = indexed.filter(r => !bad.has(r._i)).map(r => { const x={...r}; delete x._i; return x; });
   const dupKey      = removedRows.filter(x => x.reason==='DOI/ID duplicado').length;
   const dupTitle    = removedRows.filter(x => x.reason==='Título duplicado').length;
-  const dupResumo   = removedRows.filter(x => x.reason==='Resumo duplicado').length;
+  const dupResumo   = 0; // desativado
   const dupBoth     = removedRows.filter(x => x.reason==='Título + DOI idênticos').length;
   const cleanedRows = removedRows.map(item => { const r={...item.row}; delete r._i; return { row:r, reason:item.reason }; });
 
@@ -904,7 +897,7 @@ function buildBlock(pr, idx) {
   const tDupKey = results.reduce((a,r) => a+r.dupKey, 0);
   const tDupTit = results.reduce((a,r) => a+r.dupTitle, 0);
   const tDupRes = results.reduce((a,r) => a+(r.dupResumo||0), 0);
-  const tRemoved= tDupBoth + tDupKey + tDupTit + tDupRes;
+  const tRemoved= tDupBoth + tDupKey + tDupTit;
   const tKept   = tOrig - tRemoved;
   const pct     = tOrig ? Math.round(tRemoved/tOrig*100) : 0;
   const wrap    = document.createElement('div');
@@ -918,11 +911,10 @@ function buildBlock(pr, idx) {
       <span class="card-title">${file.name}</span>
     </div>
     <div class="card-b">
-      <div class="stats-grid" style="grid-template-columns:repeat(5,1fr)">
+      <div class="stats-grid" style="grid-template-columns:repeat(4,1fr)">
         <div class="stat"><div class="stat-val">${tOrig}</div><div class="stat-lbl">Originais</div></div>
-        <div class="stat"><div class="stat-val r">−${tDupBoth}</div><div class="stat-lbl">Tít.+DOI iguais</div></div>
-        <div class="stat"><div class="stat-val r">−${tDupKey+tDupTit+tDupRes}</div><div class="stat-lbl">Outros critérios</div></div>
-        <div class="stat"><div class="stat-val r">−${tDupBoth+tDupKey+tDupTit+tDupRes}</div><div class="stat-lbl">Total removidos</div></div>
+        <div class="stat"><div class="stat-val r">−${tDupBoth}</div><div class="stat-lbl">Título + DOI iguais</div></div>
+        <div class="stat"><div class="stat-val r">−${tDupKey+tDupTit}</div><div class="stat-lbl">DOI ou Título sozinho</div></div>
         <div class="stat"><div class="stat-val g">${tKept}</div><div class="stat-lbl">Mantidos (−${pct}%)</div></div>
       </div>
       ${aiEnabled && localStorage.getItem('worker_url') ? `
