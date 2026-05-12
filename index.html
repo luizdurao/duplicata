@@ -231,7 +231,7 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
           <circle cx="10" cy="10" r="8"/><path d="M10 6v4l3 3"/>
         </svg>
       </div>
-      <span class="logo-txt">Origin <span>Health v15</span></span>
+      <span class="logo-txt">Origin <span>Health v16</span></span>
     </div>
     <h1>Acesso à plataforma</h1>
     <p class="sub">Ferramentas de inteligência para pesquisa em saúde</p>
@@ -673,10 +673,10 @@ async function getFuzzyDuplicates(pr) {
 
   const articles = allRows.map(row => ({
     titulo: titleCol  ? (row[titleCol]  || '') : '',
-    resumo: resumoCol ? ((row[resumoCol] || '').substring(0, 150)) : ''
+    resumo: resumoCol ? ((row[resumoCol] || '').substring(0, 600)) : ''
   }));
 
-  const BATCH = 20;
+  const BATCH = 10;
   const allClassifications = [];
 
   // Send all articles in sequential batches
@@ -754,7 +754,7 @@ function detectStatusCol(headers) {
 }
 
 const MOTIVOS_LIST = [
-  '', 'duplicado', 'idioma', 'resumo', 'observacional', 'população',
+  '', 'incluir', 'duplicado', 'idioma', 'resumo', 'observacional', 'população',
   'desfechos', 'intervenção', 'comparador', 'animais', 'in vitro',
   'editorial', 'protocolo', 'relato de caso', 'outro tipo de revisão',
   'fase I', 'errata', 'proceedings', 'consenso'
@@ -797,9 +797,11 @@ function renderFuzzyResults(box, classifications, pr, idx) {
 }
 
 function renderReviewTable(idx, allRows, titleCol, entries, unconfirmed) {
-  const opts = MOTIVOS_LIST.map(m =>
-    '<option value="' + m + '">' + (m || '✓ Incluir (sem exclusão)') + '</option>'
-  ).join('');
+  const opts = MOTIVOS_LIST.map(m => {
+    let label = m || '— selecionar —';
+    if (m === 'incluir') label = '✓ INCLUIR no estudo';
+    return '<option value="' + m + '">' + label + '</option>';
+  }).join('');
 
   const rows = entries.map(([ri, state]) => {
     const row = allRows[parseInt(ri)];
@@ -857,7 +859,7 @@ function confirmMotivo(prIdx, rowIdx) {
   const pr = processedResults[prIdx];
   if (pr) {
     const motivo = (state.motivo || '').toLowerCase().trim();
-    const isIncluir = !motivo || ['incluir','incluído','incluido','manter'].some(x => motivo.includes(x));
+    const isIncluir = !motivo || motivo === '' || ['incluir','incluído','incluido','manter'].some(x => motivo.includes(x));
 
     if (!isIncluir) {
       // Move row from clean to removedRows
@@ -1091,61 +1093,61 @@ function downloadFull(idx) {
 
   pr.results.forEach(r => {
     const titleCol  = r.titleCol  || '';
-    const keyCol    = r.keyCol    || '';
     const motivoCol = detectMotivoCol(r.headers);
     const statusCol = detectStatusCol(r.headers);
     const fk = r.headers[0];
 
-    // Build set of removed row keys
-    const removedKeys = new Set();
-    const removedMotivos = new Map();
+    // Build title→motivo map for removed rows
+    const removedByTitle = new Map();
     (r.removedRows||[]).forEach(item => {
-      const k = (titleCol ? (item.row[titleCol]||'') : '') + '|||' + (keyCol ? (item.row[keyCol]||'') : '');
-      removedKeys.add(k);
-      removedMotivos.set(k, item.reason || 'duplicado');
+      const t = (titleCol ? (item.row[titleCol]||'') : '').trim().toLowerCase();
+      removedByTitle.set(t, item.reason || 'duplicado');
+    });
+
+    // Build title→motivo map for IA-confirmed exclusions (from reviewState)
+    const iaByTitle = new Map();
+    const iaState = reviewState[idx] || {};
+    const allClean = r.clean; // current clean array after confirmMotivo removed some
+    Object.entries(iaState).forEach(([ri, state]) => {
+      if (!state.confirmed || !state.motivo) return;
+      const m = (state.motivo||'').toLowerCase().trim();
+      const isIncluir = !m || ['incluir','incluído','incluido','manter'].some(x => m.includes(x));
+      if (isIncluir) return;
+      // Find row by index
+      const row = allClean[parseInt(ri)];
+      if (row && titleCol) {
+        const t = (row[titleCol]||'').trim().toLowerCase();
+        iaByTitle.set(t, state.motivo);
+      }
     });
 
     // Rebuild all rows (clean + removed) sorted by N
     const allRows = [
-      ...r.clean.map((row, li) => ({ ...row, _li: li, _removed: false })),
-      ...(r.removedRows||[]).map(item => ({ ...item.row, _li: -1, _removed: true, _reason: item.reason }))
+      ...r.clean.map(row => ({ ...row, _src: 'clean' })),
+      ...(r.removedRows||[]).map(item => ({ ...item.row, _src: 'removed', _reason: item.reason }))
     ];
     if (fk) allRows.sort((a,b) => (Number(a[fk])||0) - (Number(b[fk])||0));
 
-    // Apply motivos
-    const iaState = reviewState[idx] || {};
-
-    const markedRows = allRows.map((row, arrIdx) => {
+    const markedRows = allRows.map(row => {
       const out = {...row};
-      delete out._li; delete out._removed; delete out._reason;
+      delete out._src; delete out._reason;
 
-      if (row._removed) {
-        // Already excluded as duplicate
+      const t = titleCol ? (out[titleCol]||'').trim().toLowerCase() : '';
+
+      if (row._src === 'removed') {
+        // Duplicate — fill motivo + status (never overwrite existing non-empty motivo)
         if (motivoCol && !out[motivoCol]) out[motivoCol] = row._reason || 'duplicado';
-        if (statusCol && !out[statusCol]) out[statusCol] = 'Excluído';
-      } else {
-        // Clean row — check if IA suggested a motivo that was confirmed
-        const li = row._li;
-        // Find in reviewState by matching title+doi
-        let iaMotivo = null;
-        Object.entries(iaState).forEach(([ri, state]) => {
-          if (state.confirmed && state.motivo) {
-            const pr2 = processedResults[idx];
-            let offset2 = 0;
-            pr2.results.forEach(r2 => {
-              const localIdx = parseInt(ri) - offset2;
-              if (localIdx === li && localIdx >= 0 && localIdx < r2.clean.length) {
-                iaMotivo = state.motivo;
-              }
-              offset2 += r2.clean.length;
-            });
-          }
-        });
-        if (iaMotivo && motivoCol) {
-          out[motivoCol] = iaMotivo;
-          if (statusCol) out[statusCol] = 'Excluído';
+        if (statusCol) out[statusCol] = 'excluído';
+      } else if (iaByTitle.has(t)) {
+        const iaMotivo = iaByTitle.get(t);
+        const isIncluir = !iaMotivo || ['incluir','incluído','incluido','manter'].some(x => (iaMotivo||'').toLowerCase().includes(x));
+        if (!isIncluir) {
+          if (motivoCol) out[motivoCol] = iaMotivo;
+          if (statusCol) out[statusCol] = 'excluído';
         }
       }
+      // else: keep as-is (included or pending review)
+
       return out;
     });
 
