@@ -231,7 +231,7 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
           <circle cx="10" cy="10" r="8"/><path d="M10 6v4l3 3"/>
         </svg>
       </div>
-      <span class="logo-txt">Origin <span>Health v14</span></span>
+      <span class="logo-txt">Origin <span>Health v15</span></span>
     </div>
     <h1>Acesso à plataforma</h1>
     <p class="sub">Ferramentas de inteligência para pesquisa em saúde</p>
@@ -668,25 +668,33 @@ async function getFuzzyDuplicates(pr) {
   if (!titleCol && pr.results[0]?.headers?.length >= 4) titleCol = pr.results[0].headers[3];
   if (!titleCol) throw new Error('Coluna de título não detectada.');
 
-  // Classify ALL clean rows (articles not yet excluded as duplicates)
   const allRows = pr.results.flatMap(r => r.clean);
-
-  // Send in batches of 60 for speed/token limits
-  const BATCH = 20;
-  pr._fuzzyMap = allRows.map((_, i) => i);
+  pr._fuzzyMap  = allRows.map((_, i) => i);
 
   const articles = allRows.map(row => ({
-    titulo:  titleCol  ? (row[titleCol]  || '') : '',
-    resumo:  resumoCol ? ((row[resumoCol] || '').substring(0, 150)) : ''
+    titulo: titleCol  ? (row[titleCol]  || '') : '',
+    resumo: resumoCol ? ((row[resumoCol] || '').substring(0, 150)) : ''
   }));
 
-  // If >60 articles, send first batch only and note limitation
-  const batch = articles.slice(0, BATCH);
-  pr._fuzzyMap = allRows.slice(0, BATCH).map((_, i) => i);
+  const BATCH = 20;
+  const allClassifications = [];
 
-  const data = await callScript({ mode: 'classify', articles: batch });
-  if (!data.classifications) throw new Error('Apps Script não retornou classifications. Resposta: ' + JSON.stringify(data).substring(0,150));
-  return data.classifications;
+  // Send all articles in sequential batches
+  const total = articles.length;
+  for (let start = 0; start < total; start += BATCH) {
+    const batch = articles.slice(start, start + BATCH);
+    // Update progress indicator
+    const progressEl = document.getElementById('ia-progress');
+    if (progressEl) progressEl.textContent = 'Classificando artigos ' + (start+1) + '–' + Math.min(start+BATCH, total) + ' de ' + total + '…';
+
+    const data = await callScript({ mode: 'classify', articles: batch });
+    if (!data.classifications) throw new Error('Batch ' + start + ': ' + JSON.stringify(data).substring(0,150));
+    data.classifications.forEach(c => {
+      allClassifications.push({ ...c, index: c.index + start });
+    });
+  }
+
+  return allClassifications;
 }
 
 // ── Render removed rows list ─────────────────────────────────────────────────
@@ -1238,7 +1246,7 @@ function buildBlock(pr, idx) {
           <span class="fuzzy-badge">IA Fuzzy</span>
           <span class="ai-box-title">IA classificando motivos de exclusão…</span>
         </div>
-        <div class="ai-loading"><div class="spinner"></div>Analisando título e resumo de cada artigo…</div>
+        <div class="ai-loading"><div class="spinner"></div><span id="ia-progress">Classificando artigos em batches…</span></div>
       </div>` : ''}
       ${renderRemovedList(pr, idx)}
       <div style="display:flex;gap:10px;flex-wrap:wrap">
