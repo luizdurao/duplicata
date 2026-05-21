@@ -306,7 +306,7 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
           <circle cx="10" cy="10" r="8"/><path d="M10 6v4l3 3"/>
         </svg>
       </div>
-      <span class="logo-txt">Origin <span>Health</span></span>
+      <span class="logo-txt">Origin <span>Health v24</span></span>
     </div>
     <h1>Acesso à plataforma</h1>
     <p class="sub">Ferramentas de inteligência para pesquisa em saúde</p>
@@ -1374,6 +1374,18 @@ function applyIAExclusion(prIdx, realIdx, itemIdx, motivo) {
 }
 
 
+
+function forceUpdateUrl() {
+  const newUrl = prompt('Cole a URL do Apps Script:', localStorage.getItem('worker_url') || '');
+  if (newUrl && newUrl.trim().startsWith('https://')) {
+    localStorage.setItem('worker_url', newUrl.trim().replace(/\/$/, ''));
+    // Also update the field in login screen
+    const field = document.getElementById('worker-url');
+    if (field) field.value = newUrl.trim();
+    alert('URL atualizada! Clique em "Tentar novamente".');
+  }
+}
+
 // ── Diagnostics ───────────────────────────────────────────────────────────────
 async function testScript() {
   const url = localStorage.getItem('worker_url');
@@ -1628,7 +1640,15 @@ async function runDedup() {
           const f = await getFuzzyDuplicates(pr);
           renderFuzzyResults(fBox, f, pr, 0);
         } catch(e) {
-          fBox.innerHTML = '<div class="fuzzy-box-h"><span class="fuzzy-badge">IA</span></div><span style="color:var(--text3);font-size:12px">IA indisponível: ' + e.message + '<br><br><button onclick="retryIA(0)" style="margin-top:8px;padding:6px 14px;background:var(--green-dim);border:1px solid var(--border2);border-radius:6px;color:var(--green);font-size:12px;cursor:pointer">Tentar novamente</button><button onclick="testScript()" style="margin-top:8px;margin-left:8px;padding:6px 14px;background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--text3);font-size:12px;cursor:pointer">Testar conexão</button></span>';
+          const savedUrl = localStorage.getItem('worker_url') || '(não configurada)';
+          fBox.innerHTML = '<div class="fuzzy-box-h"><span class="fuzzy-badge">IA</span></div>' +
+            '<span style="color:var(--text3);font-size:12px">IA indisponível: ' + e.message + '</span>' +
+            '<div style="font-size:10px;color:var(--text3);margin-top:6px;word-break:break-all">URL em uso: ' + savedUrl + '</div>' +
+            '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">' +
+            '<button onclick="retryIA(0)" style="padding:6px 14px;background:var(--green-dim);border:1px solid var(--border2);border-radius:6px;color:var(--green);font-size:12px;cursor:pointer">Tentar novamente</button>' +
+            '<button onclick="testScript()" style="padding:6px 14px;background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--text3);font-size:12px;cursor:pointer">Testar conexão</button>' +
+            '<button onclick="forceUpdateUrl()" style="padding:6px 14px;background:transparent;border:1px solid var(--border2);border-radius:6px;color:var(--green);font-size:12px;cursor:pointer">Atualizar URL</button>' +
+            '</div>';
         }
       }
     }
