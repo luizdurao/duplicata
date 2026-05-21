@@ -1605,10 +1605,13 @@ async function runDedup() {
         const a = allRecordsFlat[i], b = allRecordsFlat[j];
         const da = String(a.DOI || '').toLowerCase().trim();
         const db = String(b.DOI || '').toLowerCase().trim();
-        const doiMatch = da && db && da !== 'nan' && db !== 'nan' && da === db;
+        const doiExact = da && db && da !== 'nan' && db !== 'nan' && da === db;
         const sim = titleSimilarity(a['Título'], b['Título']);
+        // DOI match only counts if titles also similar (≥0.70) — prevents conference
+        // supplement DOIs (same DOI for many different abstracts) from false grouping
+        const doiMatch = doiExact && sim >= 0.70;
         if (doiMatch || sim >= 0.80) {
-          pairs.push({ i, j, doiMatch, sim: Math.round(sim * 100) });
+          pairs.push({ i, j, doiMatch, doiExact, sim: Math.round(sim * 100) });
         }
       }
     }
