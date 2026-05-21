@@ -1156,7 +1156,7 @@ function renderFuzzyResults(box, classifications, pr, idx) {
       if (!reviewState[idx][realIdx]) {
         reviewState[idx][realIdx] = {
           motivo: c.motivo || '',
-          justificativa: c.justificativa || '',
+          justificativa: c.justificativa || c.just || '',
           confirmed: false,
           iaSource: true
         };
@@ -1194,7 +1194,7 @@ function renderReviewTable(idx, allRows, titleCol, entries, unconfirmed) {
       '<td class="review-source">' + fonte + '</td>' +
       '<td><select class="review-motivo-select ' + selClass + '" onchange="updateMotivo(' + idx + ',' + ri + ',this.value)">' + selected + '</select></td>' +
       '<td style="white-space:nowrap">' +
-        (state.justificativa ? '<div style="font-size:10px;color:var(--text3);margin-bottom:4px;font-style:italic">' + state.justificativa + '</div>' : '') +
+        ((state.justificativa || state.just) ? '<div style="font-size:10px;color:var(--text3);margin-bottom:4px;font-style:italic">' + (state.justificativa || state.just) + '</div>' : '') +
         '<button class="review-confirm-btn ' + btnClass + '" onclick="confirmMotivo(' + idx + ',' + ri + ')" ' + (state.confirmed?'disabled':'') + '>' + btnTxt + '</button>' +
       '</td>' +
     '</tr>';
