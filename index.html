@@ -306,7 +306,7 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
           <circle cx="10" cy="10" r="8"/><path d="M10 6v4l3 3"/>
         </svg>
       </div>
-      <span class="logo-txt">Origin <span>Health v.22</span></span>
+      <span class="logo-txt">Origin <span>Health</span></span>
     </div>
     <h1>Acesso à plataforma</h1>
     <p class="sub">Ferramentas de inteligência para pesquisa em saúde</p>
@@ -596,39 +596,85 @@ fi.addEventListener('change', () => { addFiles([...fi.files]); fi.value=''; });
 // ── File parsers ─────────────────────────────────────────────────────────────
 function parseNBIB(text) {
   const records = [];
-  const rawRecs = text.split(/(?=PMID-)/);
+  // Split on PMID- at start of line (handles both \n and \r\n)
+  const rawRecs = text.replace(/\r\n/g,'\n').split(/\n(?=PMID-)/);
+
   for (const raw of rawRecs) {
     if (!raw.trim()) continue;
-    const r = {};
+
+    // Multi-value fields (PT, LA, FAU, AU, AD, AID)
+    const multi = {};
+    // Single/concatenated fields
+    const single = {};
+
     let tag = null, vals = [];
-    for (const line of raw.split(/\r?\n/)) {
+
+    const flush = () => {
+      if (!tag) return;
+      const v = vals.join(' ').trim();
+      // Fields that can repeat
+      if (['PT','LA','FAU','AU','AID','MH','KW'].includes(tag)) {
+        if (!multi[tag]) multi[tag] = [];
+        multi[tag].push(v);
+      } else {
+        // Concatenate continuations
+        if (single[tag]) single[tag] += ' ' + v;
+        else single[tag] = v;
+      }
+    };
+
+    for (const line of raw.split('\n')) {
       const m = line.match(/^([A-Z0-9]{2,4})\s+-\s+(.*)/);
       if (m) {
-        if (tag) r[tag] = vals.join(' ').trim();
+        flush();
         tag = m[1]; vals = [m[2].trim()];
-      } else if (/^\s{6}/.test(line) && tag) {
-        vals.push(line.trim());
+      } else if (/^\s{4,}/.test(line) && tag) {
+        vals.push(line.trim()); // continuation line
       } else {
-        if (tag) r[tag] = vals.join(' ').trim();
-        tag = null; vals = [];
+        flush(); tag = null; vals = [];
       }
     }
-    if (tag) r[tag] = vals.join(' ').trim();
-    if (!r.PMID && !r.TI) continue;
+    flush();
 
-    let title = (r.TI || '').replace(/\s*PG\s*-.*$/, '').trim();
+    if (!single.PMID && !single.TI) continue;
+
+    // Title: full concatenated, remove "PG -" and after
+    let title = (single.TI || '').replace(/\s*PG\s*-.*$/i, '').trim();
+
+    // DOI: from LID [doi] or AID [doi]
     let doi = '';
-    const lid = r.LID || '';
-    if (lid.includes('[doi]')) doi = lid.replace('[doi]', '').trim();
-    if (!doi) doi = (r.AID || '').replace(/\[.*?\]/g, '').trim();
-    const fau = r.FAU || r.AU || '';
-    const firstAuthor = fau.split(',')[0].trim().split(' ')[0];
-    const yr = (r.DP || '').match(/\d{4}/);
+    const lids = multi.AID || [];
+    for (const lid of lids) {
+      if (lid.toLowerCase().includes('[doi]')) {
+        doi = lid.replace(/\[.*?\]/g,'').trim(); break;
+      }
+    }
+    if (!doi) {
+      const lid = single.LID || '';
+      if (lid.toLowerCase().includes('[doi]')) doi = lid.replace(/\[.*?\]/g,'').trim();
+    }
+
+    // First author surname only
+    const fauList = multi.FAU || multi.AU || [];
+    const firstAuthor = fauList.length ? fauList[0].split(',')[0].trim() : '';
+
+    // Year
+    const yr = (single.DP || '').match(/\d{4}/);
+
+    // All publication types joined
+    const pt = (multi.PT || []).join('; ');
+
+    // All languages joined
+    const la = (multi.LA || []).join('; ');
 
     records.push({
-      'Primeiro Autor': firstAuthor, 'Ano': yr ? yr[0] : '',
-      'Título': title, 'Resumo': r.AB || '', 'DOI': doi,
-      'Tipo de Publicação': r.PT || '', 'Idioma': r.LA || '',
+      'Primeiro Autor': firstAuthor,
+      'Ano': yr ? yr[0] : '',
+      'Título': title,
+      'Resumo': single.AB || '',
+      'DOI': doi,
+      'Tipo de Publicação': pt,
+      'Idioma': la,
       'Fonte': 'PubMed'
     });
   }
