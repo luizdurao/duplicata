@@ -306,7 +306,7 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
           <circle cx="10" cy="10" r="8"/><path d="M10 6v4l3 3"/>
         </svg>
       </div>
-      <span class="logo-txt">Origin <span>Health</span></span>
+      <span class="logo-txt">Origin <span>Health v.22</span></span>
     </div>
     <h1>Acesso à plataforma</h1>
     <p class="sub">Ferramentas de inteligência para pesquisa em saúde</p>
@@ -706,7 +706,7 @@ async function fileToRecords(file) {
             'Primeiro Autor': r['Primeiro Autor'] || '',
             'Ano': String(r['Ano'] || ''),
             'Título': r['Título'] || r['Titulo'] || '',
-            'Resumo': r['Resumo'] || r['Abstract'] || '',
+            'Resumo': (r['Resumo'] || r['Abstract'] || '').substring(0, 250),
             'DOI': r['DOI'] || r['doi'] || '',
             'Tipo de Publicação': r['Tipo de Publicação'] || '',
             'Idioma': r['Idioma'] || '',
@@ -905,7 +905,9 @@ async function callScript(payload) {
   } catch(e) {
     if (e.message.startsWith('Apps Script:')) throw e;
     // Not JSON — show first 200 chars
-    throw new Error('Resposta não é JSON: ' + text.substring(0, 200));
+    // Show first 300 chars to help diagnose
+    const preview = text.replace(/<[^>]+>/g,'').trim().substring(0, 300);
+    throw new Error('Apps Script retornou texto inválido: ' + preview);
   }
 }
 
@@ -932,17 +934,21 @@ async function getFuzzyDuplicates(pr) {
 
   const articles = allRows.map(row => ({
     titulo: titleCol  ? (row[titleCol]  || '') : '',
-    resumo: resumoCol ? ((row[resumoCol] || '').substring(0, 600)) : ''
+    resumo: resumoCol ? ((row[resumoCol] || '').substring(0, 250)) : ''
   }));
 
-  const BATCH = 5;
+  const BATCH = 15;
   const allClassifications = [];
 
   // Send all articles in sequential batches
   const total = articles.length;
+  // Show elegibility preview
+  const elegPrev = document.getElementById('ia-eleg-preview');
+  const elegVal = (document.getElementById('eleg-text')?.value || '').trim();
+  if (elegPrev) elegPrev.textContent = elegVal ? '📋 Critério: ' + elegVal.substring(0,120) + (elegVal.length>120?'…':'') : '⚠ Critério de elegibilidade não definido — usando regras padrão';
+
   for (let start = 0; start < total; start += BATCH) {
     const batch = articles.slice(start, start + BATCH);
-    // Update progress indicator
     const progressEl = document.getElementById('ia-progress');
     if (progressEl) progressEl.textContent = 'Classificando artigos ' + (start+1) + '–' + Math.min(start+BATCH, total) + ' de ' + total + '…';
 
@@ -1590,6 +1596,13 @@ async function runDedup() {
 function renderPairsSection(pairs, idx) {
   if (!pairs.length) return '';
   const confPairs = pairs.filter(p => p.aConf || p.bConf).length;
+  // Sort: DOI matches first, then by similarity desc
+  const sorted = [...pairs].sort((a,b) => {
+    if (a.doiMatch && !b.doiMatch) return -1;
+    if (!a.doiMatch && b.doiMatch) return 1;
+    return b.sim - a.sim;
+  });
+  pairs = sorted;
   let html = '<div class="pairs-section">' +
     '<div class="pairs-toggle" id="pt-' + idx + '" onclick="togglePairs(' + idx + ')">' +
       '<span>🔗 ' + pairs.length + ' par' + (pairs.length!==1?'es':'') + ' duplicado' + (pairs.length!==1?'s':'') + ' encontrado' + (pairs.length!==1?'s':'') +
@@ -1599,14 +1612,19 @@ function renderPairsSection(pairs, idx) {
     '<div class="pairs-list" id="pl-' + idx + '">';
 
   for (const p of pairs) {
-    const simCls = p.sim >= 90 ? 'high' : p.sim >= 80 ? 'med' : 'med';
+    const simCls = p.sim >= 90 ? 'high' : 'med';
     const isJournalPromo = (p.aConf && !p.bConf) || (p.bConf && !p.aConf);
+    const simLabel = p.doiMatch ? '<span class="pair-sim high">DOI idêntico</span>' :
+      '<span class="pair-sim ' + simCls + '">' + p.sim + '% similar</span>';
+    const barW = Math.min(100, p.sim);
+    const barCls = p.sim >= 90 ? '' : 'warn';
     html += '<div class="pair-item">' +
-      '<span class="pair-sim ' + simCls + '">' + (p.doiMatch ? 'DOI=' : p.sim + '%') + '</span> ' +
+      simLabel +
+      (p.doiMatch ? '' : '<div class="sim-bar-wrap"><div class="sim-bar"><div class="sim-bar-fill ' + barCls + '" style="width:' + barW + '%"></div></div></div>') +
       '<span class="pair-title">' +
-        '<b>' + (p.aFonte||'') + ':</b> ' + String(p.aTitle||'').substring(0,90) +
+        '<b>' + (p.aFonte||'') + ':</b> ' + String(p.aTitle||'').substring(0,100) +
         (p.aConf ? '<span class="conf-badge">Conferência</span>' : '') +
-        '<br><b>' + (p.bFonte||'') + ':</b> ' + String(p.bTitle||'').substring(0,90) +
+        '<br><b>' + (p.bFonte||'') + ':</b> ' + String(p.bTitle||'').substring(0,100) +
         (p.bConf ? '<span class="conf-badge">Conferência</span>' : '') +
       '</span>' +
       '<div class="pair-decision' + (isJournalPromo ? ' journal' : '') + '">' + (p.decision||'') + '</div>' +
@@ -1658,6 +1676,7 @@ function buildBlock(pr, idx) {
           <span class="ai-box-title">IA classificando motivos de exclusão…</span>
         </div>
         <div class="ai-loading"><div class="spinner"></div><span id="ia-progress">Classificando artigos em batches…</span></div>
+        <div style="font-size:11px;color:var(--text3);margin-top:8px" id="ia-eleg-preview"></div>
       </div>` : ''}
       ${renderRemovedList(pr, idx)}
       <button class="dl-btn" onclick="downloadFull(${idx})">
