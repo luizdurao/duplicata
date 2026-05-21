@@ -262,6 +262,35 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
   .btn-add-motivo:hover{background:var(--green);color:#080c0b}
   .motivos-hint{font-size:11px;color:var(--text3);margin-top:8px}
 
+
+  /* ── SOURCE / SIMILARITY ── */
+  .source-badge{display:inline-block;font-size:10px;font-weight:600;padding:2px 7px;border-radius:4px;letter-spacing:.04em}
+  .source-pubmed{background:rgba(0,123,255,.15);color:#4a9eff}
+  .source-embase{background:rgba(255,165,0,.15);color:#ffa040}
+  .source-merged{background:var(--green-dim);color:var(--green)}
+  .sim-bar-wrap{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text3);margin-top:4px}
+  .sim-bar{height:4px;border-radius:2px;background:var(--border);flex:1;max-width:80px}
+  .sim-bar-fill{height:100%;border-radius:2px;background:var(--green)}
+  .sim-bar-fill.warn{background:#e0a052}
+  .sim-bar-fill.danger{background:var(--danger)}
+  .conf-badge{font-size:10px;font-weight:600;padding:2px 6px;border-radius:4px;background:rgba(224,160,82,.15);color:#e0a052;margin-left:4px}
+  .pairs-section{margin-bottom:14px}
+  .pairs-toggle{display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;font-size:12px;color:var(--text2);transition:all .2s;user-select:none}
+  .pairs-toggle:hover{border-color:var(--border2);color:var(--text)}
+  .pairs-toggle-arrow{margin-left:auto;font-size:10px;transition:transform .2s}
+  .pairs-toggle.open .pairs-toggle-arrow{transform:rotate(180deg)}
+  .pairs-list{display:none;margin-top:8px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+  .pairs-list.open{display:block}
+  .pair-item{padding:10px 14px;border-bottom:1px solid var(--border);font-size:12px}
+  .pair-item:last-child{border-bottom:none}
+  .pair-item:hover{background:var(--green-dim)}
+  .pair-sim{font-weight:600;min-width:44px;display:inline-block}
+  .pair-sim.high{color:var(--green)}
+  .pair-sim.med{color:#e0a052}
+  .pair-title{color:var(--text2);line-height:1.5}
+  .pair-decision{font-size:11px;color:var(--text3);margin-top:3px}
+  .pair-decision.journal{color:var(--green)}
+
 </style>
 </head>
 <body>
@@ -277,7 +306,7 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
           <circle cx="10" cy="10" r="8"/><path d="M10 6v4l3 3"/>
         </svg>
       </div>
-      <span class="logo-txt">Origin <span>Health v20</span></span>
+      <span class="logo-txt">Origin <span>Health</span></span>
     </div>
     <h1>Acesso à plataforma</h1>
     <p class="sub">Ferramentas de inteligência para pesquisa em saúde</p>
@@ -335,7 +364,7 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
     <div class="ph">
       <div class="eyebrow">Ferramenta de dados</div>
       <div class="ptitle">Deduplicador de Planilhas</div>
-      <p class="pdesc">Carregue sua planilha de busca, detecte duplicatas automaticamente e use a IA para sugerir o motivo de exclusão de cada artigo. Revise, confirme e baixe a planilha pronta para o PRISMA.</p>
+      <p class="pdesc">Carregue arquivos de qualquer base (.nbib do PubMed, .xlsx do Embase). A ferramenta converte, unifica, calcula similaridade entre títulos, prioriza artigos em journal sobre conferências, e usa IA para sugerir motivos de exclusão.</p>
     </div>
 
     <!-- Upload -->
@@ -354,8 +383,8 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
             <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M12 18v-6M9 15l3-3 3 3"/>
           </svg>
           <p>Arraste arquivos aqui ou clique para selecionar</p>
-          <small>Suporta .xlsx e .xls — múltiplos arquivos</small>
-          <input type="file" id="fi" accept=".xlsx,.xls" multiple>
+          <small>Suporta .xlsx (Embase), .nbib (PubMed), .ris — múltiplos arquivos de bases diferentes</small>
+          <input type="file" id="fi" accept=".xlsx,.xls,.nbib,.ris,.txt" multiple>
         </div>
         <div class="flist" id="flist"></div>
       </div>
@@ -410,8 +439,8 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
         </div>
         <div class="eleg-field" id="eleg-field">
           <label>Critério de elegibilidade (PICO da revisão)</label>
-          <textarea id="eleg-text" oninput="localStorage.setItem('eleg_text',this.value)" placeholder="Cole aqui o critério de elegibilidade da sua revisão..."></textarea>
-          <div class="eleg-hint">A IA usará esse critério para classificar cada artigo como incluir ou excluir.</div>
+          <textarea id="eleg-text" oninput="localStorage.setItem('eleg_text',this.value);const s=document.getElementById('eleg-status');if(s)s.textContent=this.value.trim()?'✓ Salvo ('+this.value.trim().length+' caracteres)':'';" placeholder="Cole aqui o critério de elegibilidade da sua revisão..."></textarea>
+          <div class="eleg-hint">A IA usará esse critério para classificar cada artigo. O texto é salvo automaticamente. <span id="eleg-status" style="color:var(--green)"></span></div>
         </div>
         <div class="worker-warn" id="worker-warn" style="display:none">
           <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
@@ -522,8 +551,13 @@ function doLogin() {
       renderMotivosEditor();
       // Set default elegibility text if empty
       const elegEl = document.getElementById('eleg-text');
-      if (elegEl && !elegEl.value.trim()) {
-        elegEl.value = localStorage.getItem('eleg_text') || '';
+      if (elegEl) {
+        const saved = localStorage.getItem('eleg_text') || '';
+        if (!elegEl.value.trim() && saved) {
+          elegEl.value = saved;
+          const s = document.getElementById('eleg-status');
+          if (s) s.textContent = '✓ Carregado (' + saved.length + ' caracteres)';
+        }
       }
     } else {
       err.style.display = 'block';
@@ -559,6 +593,161 @@ drop.addEventListener('dragleave', () => drop.classList.remove('over'));
 drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); addFiles([...e.dataTransfer.files]); });
 fi.addEventListener('change', () => { addFiles([...fi.files]); fi.value=''; });
 
+// ── File parsers ─────────────────────────────────────────────────────────────
+function parseNBIB(text) {
+  const records = [];
+  const rawRecs = text.split(/(?=PMID-)/);
+  for (const raw of rawRecs) {
+    if (!raw.trim()) continue;
+    const r = {};
+    let tag = null, vals = [];
+    for (const line of raw.split(/\r?\n/)) {
+      const m = line.match(/^([A-Z0-9]{2,4})\s+-\s+(.*)/);
+      if (m) {
+        if (tag) r[tag] = vals.join(' ').trim();
+        tag = m[1]; vals = [m[2].trim()];
+      } else if (/^\s{6}/.test(line) && tag) {
+        vals.push(line.trim());
+      } else {
+        if (tag) r[tag] = vals.join(' ').trim();
+        tag = null; vals = [];
+      }
+    }
+    if (tag) r[tag] = vals.join(' ').trim();
+    if (!r.PMID && !r.TI) continue;
+
+    let title = (r.TI || '').replace(/\s*PG\s*-.*$/, '').trim();
+    let doi = '';
+    const lid = r.LID || '';
+    if (lid.includes('[doi]')) doi = lid.replace('[doi]', '').trim();
+    if (!doi) doi = (r.AID || '').replace(/\[.*?\]/g, '').trim();
+    const fau = r.FAU || r.AU || '';
+    const firstAuthor = fau.split(',')[0].trim().split(' ')[0];
+    const yr = (r.DP || '').match(/\d{4}/);
+
+    records.push({
+      'Primeiro Autor': firstAuthor, 'Ano': yr ? yr[0] : '',
+      'Título': title, 'Resumo': r.AB || '', 'DOI': doi,
+      'Tipo de Publicação': r.PT || '', 'Idioma': r.LA || '',
+      'Fonte': 'PubMed'
+    });
+  }
+  return records;
+}
+
+function parseRIS(text) {
+  const records = [];
+  let current = null;
+  for (const line of text.split(/\r?\n/)) {
+    const m = line.match(/^([A-Z0-9]{2})\s+-\s+(.*)/);
+    if (m) {
+      if (m[1] === 'TY') { current = {}; }
+      if (!current) continue;
+      const tag = m[1], val = m[2].trim();
+      if (current[tag]) current[tag] += ' ' + val;
+      else current[tag] = val;
+    } else if (line.trim() === 'ER  -' && current) {
+      const yr = (current.PY || current.Y1 || '').match(/\d{4}/);
+      const fau = current.A1 || current.AU || '';
+      const fa = fau.split(',')[0].trim().split(' ')[0];
+      records.push({
+        'Primeiro Autor': fa, 'Ano': yr ? yr[0] : '',
+        'Título': current.TI || current.T1 || '', 'Resumo': current.AB || current.N2 || '',
+        'DOI': current.DO || current.M3 || '', 'Tipo de Publicação': current.TY || '',
+        'Idioma': current.LA || '', 'Fonte': 'RIS'
+      });
+      current = null;
+    }
+  }
+  return records;
+}
+
+function parseEmbaseXLSX(sheetRows) {
+  // sheetRows = array of row objects from XLSX.utils.sheet_to_json
+  return sheetRows.map(r => {
+    const authors = String(r['Author Names'] || r['Authors'] || '');
+    const fa = authors.split(',')[0].trim().split(/[\s.]/)[0];
+    return {
+      'Primeiro Autor': fa,
+      'Ano': String(r['Publication Year'] || r['Year'] || '').replace('.0',''),
+      'Título': String(r['Title'] || ''),
+      'Resumo': String(r['Abstract'] || ''),
+      'DOI': String(r['DOI'] || ''),
+      'Tipo de Publicação': String(r['Publication Type'] || r['Type'] || ''),
+      'Idioma': String(r['Article Language'] || r['Language'] || ''),
+      'Fonte': 'Embase'
+    };
+  });
+}
+
+async function fileToRecords(file) {
+  const name = file.name.toLowerCase();
+  return new Promise((res, rej) => {
+    const reader = new FileReader();
+    if (name.endsWith('.nbib') || name.endsWith('.txt')) {
+      reader.onload = e => res(parseNBIB(e.target.result));
+      reader.readAsText(file, 'utf-8');
+    } else if (name.endsWith('.ris')) {
+      reader.onload = e => res(parseRIS(e.target.result));
+      reader.readAsText(file, 'utf-8');
+    } else {
+      // Excel — detect by columns
+      reader.onload = e => {
+        const wb = XLSX.read(e.target.result, { type: 'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+        if (!rows.length) { res([]); return; }
+        const cols = Object.keys(rows[0]).map(c => c.toLowerCase());
+        if (cols.some(c => c.includes('author names') || c.includes('embase'))) {
+          res(parseEmbaseXLSX(rows));
+        } else {
+          // Already in standard format (previously converted)
+          res(rows.map(r => ({
+            'Primeiro Autor': r['Primeiro Autor'] || '',
+            'Ano': String(r['Ano'] || ''),
+            'Título': r['Título'] || r['Titulo'] || '',
+            'Resumo': r['Resumo'] || r['Abstract'] || '',
+            'DOI': r['DOI'] || r['doi'] || '',
+            'Tipo de Publicação': r['Tipo de Publicação'] || '',
+            'Idioma': r['Idioma'] || '',
+            'Fonte': r['Fonte'] || 'Excel'
+          })));
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    }
+  });
+}
+
+// Normalized title for similarity
+function normTitle(t) {
+  return String(t).toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/[\u2010-\u2015]/g, '-')
+    .replace(/[^\w\s]/g,' ').replace(/\s+/g,' ').trim();
+}
+
+function titleSimilarity(a, b) {
+  a = normTitle(a); b = normTitle(b);
+  if (!a || !b) return 0;
+  const la = a.length, lb = b.length;
+  if (Math.abs(la - lb) > Math.max(la, lb) * 0.5) return 0;
+  // LCS-based similarity
+  let matches = 0;
+  const wordsA = new Set(a.split(' '));
+  for (const w of b.split(' ')) { if (wordsA.has(w) && w.length > 2) matches++; }
+  return (2 * matches) / (a.split(' ').length + b.split(' ').length);
+}
+
+function isConference(rec) {
+  const pt = String(rec['Tipo de Publicação'] || '').toLowerCase();
+  const ti = String(rec['Título'] || '').toLowerCase();
+  return ['conference','congress','meeting','abstract','proceedings','poster','oral presentation']
+    .some(x => pt.includes(x)) ||
+    /^(wcn|ugw|ddw|aga|acg|ueg|esge|ago)\d/.test(ti.replace(/\s/g,'').toLowerCase());
+}
+
+// ── addFiles: store raw File objects ──────────────────────────────────────────
 function addFiles(nf) {
   nf.forEach(f => { if (!files.find(x => x.name===f.name && x.size===f.size)) files.push(f); });
   renderFiles();
@@ -578,7 +767,18 @@ function renderFiles() {
     list.appendChild(d);
   });
   document.getElementById('cfg-card').style.display = files.length ? 'block' : 'none';
-  if (files.length) renderMotivosEditor();
+  if (files.length) {
+    renderMotivosEditor();
+    const elegEl2 = document.getElementById('eleg-text');
+    if (elegEl2) {
+      const saved2 = localStorage.getItem('eleg_text') || '';
+      if (!elegEl2.value.trim() && saved2) {
+        elegEl2.value = saved2;
+        const s2 = document.getElementById('eleg-status');
+        if (s2) s2.textContent = '✓ Carregado (' + saved2.length + ' caracteres)';
+      }
+    }
+  }
   document.getElementById('run-btn').disabled = files.length === 0;
 }
 function removeFile(i) { files.splice(i, 1); renderFiles(); }
@@ -1287,58 +1487,140 @@ function downloadFull(idx) {
 // ── Run ───────────────────────────────────────────────────────────────────────
 async function runDedup() {
   const area = document.getElementById('results');
-  area.innerHTML = `<div class="processing"><div class="proc-spinner"></div><p>Processando planilhas…</p></div>`;
+  area.innerHTML = '<div class="processing"><div class="proc-spinner"></div><p id="proc-msg">Convertendo arquivos…</p></div>';
   document.getElementById('run-btn').disabled = true;
   processedResults = [];
 
   try {
-    const processed = await Promise.all(files.map(f => new Promise((res, rej) => {
-      const reader = new FileReader();
-      reader.onload = e => {
-        try {
-          const wb = XLSX.read(e.target.result, { type: 'array' });
-          const results = wb.SheetNames.map(sheetName => {
-            const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval: '' });
-            if (!rows.length) return null;
-            const headers = Object.keys(rows[0]);
-            const { clean, dupKey, dupTitle, dupResumo, dupBoth, keyCol, titleCol, resumoCol, removedRows } = deduplicate(rows, headers);
-            return { sheetName, original: rows.length, clean, dupKey, dupTitle, dupResumo, dupBoth, keyCol, titleCol, resumoCol, headers, removedRows };
-          }).filter(Boolean);
-          res({ file: f, results });
-        } catch(err) { rej(err); }
-      };
-      reader.onerror = rej;
-      reader.readAsArrayBuffer(f);
-    })));
-
-    processedResults = processed;
-    area.innerHTML = '';
-    processed.forEach((pr, idx) => area.appendChild(buildBlock(pr, idx)));
-
-    const wurl = localStorage.getItem('worker_url'); if (aiEnabled && wurl) {
-      const boxes = area.querySelectorAll('.ai-box');
-      await Promise.all(processed.map(async (pr, i) => {
-        const fBox = area.querySelector('#fuzzy-' + i);
-        if (fBox) {
-          await getFuzzyDuplicates(pr)
-            .then(f => renderFuzzyResults(fBox, f, pr, i))
-            .catch(e => {
-              fBox.innerHTML =
-                '<div class="fuzzy-box-h"><span class="fuzzy-badge">IA</span>' +
-                '<span class="ai-box-title" style="color:var(--danger)">IA indisponível</span></div>' +
-                '<div style="font-size:12px;color:var(--text3);margin-top:8px;line-height:1.6">' +
-                  e.message +
-                  '<br><br><button onclick="retryIA(' + i + ')" style="margin-top:8px;padding:6px 14px;background:var(--green-dim);border:1px solid var(--border2);border-radius:6px;color:var(--green);font-size:12px;cursor:pointer">Tentar novamente</button>' +
-                  '<button onclick="testScript()" style="margin-top:8px;margin-left:8px;padding:6px 14px;background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--text3);font-size:12px;cursor:pointer">Testar conexão</button>' +
-                '</div>';
-            });
-        }
-      }));
+    // 1. Parse all files into records
+    document.getElementById('proc-msg').textContent = 'Lendo e convertendo arquivos…';
+    const allRecordsFlat = [];
+    for (const file of files) {
+      const recs = await fileToRecords(file);
+      allRecordsFlat.push(...recs);
     }
+
+    if (!allRecordsFlat.length) throw new Error('Nenhum registro encontrado nos arquivos.');
+    document.getElementById('proc-msg').textContent = `${allRecordsFlat.length} registros carregados. Calculando similaridade…`;
+
+    // 2. Find duplicate pairs with similarity
+    const pairs = [];
+    const n = allRecordsFlat.length;
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        const a = allRecordsFlat[i], b = allRecordsFlat[j];
+        const da = String(a.DOI || '').toLowerCase().trim();
+        const db = String(b.DOI || '').toLowerCase().trim();
+        const doiMatch = da && db && da !== 'nan' && db !== 'nan' && da === db;
+        const sim = titleSimilarity(a['Título'], b['Título']);
+        if (doiMatch || sim >= 0.80) {
+          pairs.push({ i, j, doiMatch, sim: Math.round(sim * 100) });
+        }
+      }
+    }
+
+    // 3. Decide which to remove (prefer journal over conference)
+    const removeIdx = new Set();
+    const pairDetails = [];
+    for (const p of pairs) {
+      const a = allRecordsFlat[p.i], b = allRecordsFlat[p.j];
+      const aConf = isConference(a), bConf = isConference(b);
+      let decision, removeJ;
+      if (aConf && !bConf)      { decision = 'Manter B — journal sobre conferência'; removeJ = p.i; }
+      else if (bConf && !aConf) { decision = 'Manter A — journal sobre conferência'; removeJ = p.j; }
+      else                      { decision = 'Manter A — primeiro encontrado';        removeJ = p.j; }
+      if (!removeIdx.has(p.i)) removeIdx.add(removeJ);
+      pairDetails.push({ ...p, aTitle: a['Título'], bTitle: b['Título'],
+        aConf, bConf, aFonte: a.Fonte, bFonte: b.Fonte, decision });
+    }
+
+    // 4. Build cleaned records list
+    const cleanRecords = allRecordsFlat.filter((_,i) => !removeIdx.has(i));
+
+    // 5. Build a single processedResult for the pipeline
+    const headers = ['Primeiro Autor','Ano','Título','Resumo','Fonte','Tipo de Publicação','Idioma','DOI'];
+    const pr = {
+      file: { name: files.map(f=>f.name).join(' + ') },
+      _pairs: pairDetails,
+      _totalOriginal: allRecordsFlat.length,
+      results: [{
+        sheetName: 'Resultados da busca',
+        original: allRecordsFlat.length,
+        clean: cleanRecords,
+        dupKey:   pairs.filter(p=>p.doiMatch).length,
+        dupTitle: pairs.filter(p=>!p.doiMatch).length,
+        dupResumo: 0, dupBoth: 0,
+        keyCol: 'DOI', titleCol: 'Título', resumoCol: 'Resumo',
+        headers,
+        removedRows: allRecordsFlat
+          .filter((_,i) => removeIdx.has(i))
+          .map(r => ({ row: r, reason: 'duplicado' }))
+      }]
+    };
+
+    processedResults = [pr];
+    area.innerHTML = '';
+    area.appendChild(buildBlock(pr, 0));
+
+    // Show pairs section
+    const pairsHtml = renderPairsSection(pairDetails, 0);
+    const card = area.querySelector('.card');
+    if (card) card.querySelector('.card-b').insertAdjacentHTML('afterbegin', pairsHtml);
+
+    // IA classification
+    const wurl = localStorage.getItem('worker_url');
+    if (aiEnabled && wurl) {
+      const fBox = area.querySelector('#fuzzy-0');
+      if (fBox) {
+        try {
+          const f = await getFuzzyDuplicates(pr);
+          renderFuzzyResults(fBox, f, pr, 0);
+        } catch(e) {
+          fBox.innerHTML = '<div class="fuzzy-box-h"><span class="fuzzy-badge">IA</span></div><span style="color:var(--text3);font-size:12px">IA indisponível: ' + e.message + '<br><br><button onclick="retryIA(0)" style="margin-top:8px;padding:6px 14px;background:var(--green-dim);border:1px solid var(--border2);border-radius:6px;color:var(--green);font-size:12px;cursor:pointer">Tentar novamente</button><button onclick="testScript()" style="margin-top:8px;margin-left:8px;padding:6px 14px;background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--text3);font-size:12px;cursor:pointer">Testar conexão</button></span>';
+        }
+      }
+    }
+
   } catch(err) {
-    area.innerHTML = `<div class="card"><div class="card-b" style="color:var(--danger);padding:22px">Erro: ${err.message}</div></div>`;
+    area.innerHTML = '<div class="card"><div class="card-b" style="color:var(--danger);padding:22px">Erro: ' + err.message + '</div></div>';
   }
   document.getElementById('run-btn').disabled = false;
+}
+
+function renderPairsSection(pairs, idx) {
+  if (!pairs.length) return '';
+  const confPairs = pairs.filter(p => p.aConf || p.bConf).length;
+  let html = '<div class="pairs-section">' +
+    '<div class="pairs-toggle" id="pt-' + idx + '" onclick="togglePairs(' + idx + ')">' +
+      '<span>🔗 ' + pairs.length + ' par' + (pairs.length!==1?'es':'') + ' duplicado' + (pairs.length!==1?'s':'') + ' encontrado' + (pairs.length!==1?'s':'') +
+      (confPairs ? ' — ' + confPairs + ' conferência→journal' : '') + '</span>' +
+      '<span class="pairs-toggle-arrow">▼</span>' +
+    '</div>' +
+    '<div class="pairs-list" id="pl-' + idx + '">';
+
+  for (const p of pairs) {
+    const simCls = p.sim >= 90 ? 'high' : p.sim >= 80 ? 'med' : 'med';
+    const isJournalPromo = (p.aConf && !p.bConf) || (p.bConf && !p.aConf);
+    html += '<div class="pair-item">' +
+      '<span class="pair-sim ' + simCls + '">' + (p.doiMatch ? 'DOI=' : p.sim + '%') + '</span> ' +
+      '<span class="pair-title">' +
+        '<b>' + (p.aFonte||'') + ':</b> ' + String(p.aTitle||'').substring(0,90) +
+        (p.aConf ? '<span class="conf-badge">Conferência</span>' : '') +
+        '<br><b>' + (p.bFonte||'') + ':</b> ' + String(p.bTitle||'').substring(0,90) +
+        (p.bConf ? '<span class="conf-badge">Conferência</span>' : '') +
+      '</span>' +
+      '<div class="pair-decision' + (isJournalPromo ? ' journal' : '') + '">' + (p.decision||'') + '</div>' +
+    '</div>';
+  }
+  html += '</div></div>';
+  return html;
+}
+
+function togglePairs(idx) {
+  const t = document.getElementById('pt-' + idx);
+  const l = document.getElementById('pl-' + idx);
+  if (t) t.classList.toggle('open');
+  if (l) l.classList.toggle('open');
 }
 
 function buildBlock(pr, idx) {
@@ -1365,7 +1647,7 @@ function buildBlock(pr, idx) {
       <div class="stats-grid" style="grid-template-columns:repeat(5,1fr)">
         <div class="stat"><div class="stat-val">${tOrig}</div><div class="stat-lbl">Originais</div></div>
         <div class="stat"><div class="stat-val r">−${tDupKey}</div><div class="stat-lbl">Dup. por DOI</div></div>
-        <div class="stat"><div class="stat-val r">−${tDupTit}</div><div class="stat-lbl">Dup. por Título</div></div>
+        <div class="stat"><div class="stat-val r">−${tDupTit}</div><div class="stat-lbl">Dup. por Título (≥80%)</div></div>
         <div class="stat" id="stat-kept-${idx}"><div class="stat-val g" id="kept-val-${idx}">${tKept}</div><div class="stat-lbl" id="kept-lbl-${idx}">Mantidos (−${pct}%)</div></div>
         <div class="stat" id="stat-ia-${idx}"><div class="stat-val r" id="ia-val-${idx}">−0</div><div class="stat-lbl">Excluídos pela IA</div></div>
       </div>
