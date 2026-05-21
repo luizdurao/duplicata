@@ -306,7 +306,7 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
           <circle cx="10" cy="10" r="8"/><path d="M10 6v4l3 3"/>
         </svg>
       </div>
-      <span class="logo-txt">Origin <span>Health v25</span></span>
+      <span class="logo-txt">Origin <span>Health</span></span>
     </div>
     <h1>Acesso à plataforma</h1>
     <p class="sub">Ferramentas de inteligência para pesquisa em saúde</p>
@@ -934,15 +934,15 @@ function deduplicate(rows, headers) {
 async function callScript(payload) {
   const scriptUrl = localStorage.getItem('worker_url');
   if (!scriptUrl) throw new Error('URL do Apps Script não configurada.');
-  const params = new URLSearchParams({ data: JSON.stringify(payload) });
+
+  // Apps Script requires GET with ?data= to avoid CORS POST issues
+  const url = scriptUrl + '?data=' + encodeURIComponent(JSON.stringify(payload));
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 55000); // 55s timeout
+  const timeout = setTimeout(() => controller.abort(), 45000);
   let resp;
   try {
-    resp = await fetch(scriptUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: params.toString(),
+    resp = await fetch(url, {
+      method: 'GET',
       redirect: 'follow',
       signal: controller.signal
     });
@@ -950,7 +950,7 @@ async function callScript(payload) {
     clearTimeout(timeout);
   }
   const text = await resp.text();
-  if (!text || !text.trim()) throw new Error('Apps Script retornou resposta vazia. Verifique os logs em script.google.com.');
+  if (!text || !text.trim()) throw new Error('Apps Script retornou resposta vazia.');
   try {
     const data = JSON.parse(text);
     if (data.error) throw new Error('Apps Script: ' + data.error);
@@ -987,10 +987,10 @@ async function getFuzzyDuplicates(pr) {
 
   const articles = allRows.map(row => ({
     titulo: titleCol  ? (row[titleCol]  || '') : '',
-    resumo: resumoCol ? ((row[resumoCol] || '').substring(0, 250)) : ''
+    resumo: resumoCol ? ((row[resumoCol] || '').substring(0, 180)) : ''
   }));
 
-  const BATCH = 15;
+  const BATCH = 8;
   const allClassifications = [];
 
   // Send all articles in sequential batches
