@@ -1490,64 +1490,87 @@ function downloadFull(idx) {
   const wb = XLSX.utils.book_new();
 
   pr.results.forEach(r => {
-    const titleCol = r.titleCol || '';
-    const fk       = r.headers[0];
-
-    // Build title → {status, motivo} map for removed rows (duplicatas automáticas)
-    const exclusionMap = new Map();
-    (r.removedRows||[]).forEach(item => {
-      const t = (titleCol ? (item.row[titleCol]||'') : '').trim().toLowerCase();
-      exclusionMap.set(t, { status: 'Excluído', motivo: item.reason || 'duplicado' });
-    });
-
-    // Add IA-confirmed exclusions — use saved _title for reliable lookup
-    const iaState = reviewState[idx] || {};
-    Object.entries(iaState).forEach(([ri, state]) => {
-      if (!state.confirmed || !state.motivo) return;
-      const m = (state.motivo||'').toLowerCase().trim();
-      const isIncluir = !m || ['incluir','incluído','incluido','manter'].some(x => m.includes(x));
-      if (isIncluir) return;
-      // Use _title saved during confirmMotivo (most reliable)
-      if (state._title) {
-        exclusionMap.set(state._title, { status: 'Excluído', motivo: state.motivo });
-      }
-    });
-
-    // Rebuild all rows (clean + removed) sorted by original order
-    const allRows = [
-      ...r.clean.map(row => ({ ...row, _src: 'clean' })),
-      ...(r.removedRows||[]).map(item => ({ ...item.row, _src: 'removed' }))
-    ];
-    if (fk) allRows.sort((a,b) => (Number(a[fk])||0) - (Number(b[fk])||0));
-
-    // New columns at the end: Status_ferramenta + Motivo_ferramenta
+    const fk = r.headers[0];
     const NEW_STATUS = 'Status_ferramenta';
     const NEW_MOTIVO = 'Motivo_ferramenta';
     const fullHeaders = [...r.headers, NEW_STATUS, NEW_MOTIVO];
 
+    // ── IA-confirmed exclusions by row index ──────────────────────────────────
+    const iaExclusions = new Map(); // rowIndex → motivo
+    const iaState = reviewState[idx] || {};
+    Object.entries(iaState).forEach(([ri, state]) => {
+      if (!state.confirmed || !state.motivo) return;
+      const m = (state.motivo||'').toLowerCase().trim();
+      if (!m || ['incluir','incluído','incluido','manter'].some(x => m.includes(x))) return;
+      iaExclusions.set(parseInt(ri), state.motivo);
+    });
+
+    // ── Build rows: use _src as ground truth for status ───────────────────────
+    // clean rows → Incluído (unless IA confirmed exclusion)
+    // removed rows → Excluído (duplicado or other reason)
+    const cleanRows    = r.clean.map((row, li) => ({
+      ...row, _src: 'clean', _li: li,
+      _iaMotivo: iaExclusions.get(li) || null
+    }));
+    const removedRows  = (r.removedRows||[]).map(item => ({
+      ...item.row, _src: 'removed', _reason: item.reason || 'duplicado'
+    }));
+
+    const allRows = [...cleanRows, ...removedRows];
+    // Sort by first numeric column if available
+    if (fk) allRows.sort((a,b) => (Number(a[fk])||0) - (Number(b[fk])||0));
+
+    // ── Auto-exclude by Tipo de Publicação ────────────────────────────────────
+    const tipoCol = r.headers.find(h => {
+      const n = h.toString().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z]/g,'');
+      return n.includes('tipodepublicacao') || n.includes('publicationtype') || n.includes('tipo');
+    });
+    const AUTO_EXCLUDE = {
+      'conference abstract':      'resumo',
+      'conference paper':         'resumo',
+      'conference review':        'resumo',
+      'proceedings paper':        'proceedings',
+      'editorial':                'editorial',
+      'letter':                   'editorial',
+      'note':                     'editorial',
+      'comment':                  'editorial',
+      'erratum':                  'errata',
+      'correction':               'errata',
+      'retraction':               'errata',
+      'case reports':             'relato de caso',
+      'case report':              'relato de caso',
+    };
+
     const markedRows = allRows.map(row => {
       const out = {...row};
-      delete out._src;
+      delete out._src; delete out._li; delete out._reason; delete out._iaMotivo;
 
-      const t = titleCol ? (out[titleCol]||'').trim().toLowerCase() : '';
-      const excl = exclusionMap.get(t);
-
-      if (excl) {
-        out[NEW_STATUS] = excl.status;
-        out[NEW_MOTIVO] = excl.motivo;
+      if (row._src === 'removed') {
+        out[NEW_STATUS] = 'Excluído';
+        out[NEW_MOTIVO] = row._reason || 'duplicado';
       } else {
-        out[NEW_STATUS] = 'Incluído';
-        out[NEW_MOTIVO] = '';
+        // Check auto-exclude by publication type
+        const tipo = tipoCol ? (row[tipoCol]||'').toString().toLowerCase().trim() : '';
+        const autoMotivo = Object.entries(AUTO_EXCLUDE).find(([k]) => tipo.includes(k))?.[1];
+
+        if (autoMotivo) {
+          out[NEW_STATUS] = 'Excluído';
+          out[NEW_MOTIVO] = autoMotivo;
+        } else if (row._iaMotivo) {
+          out[NEW_STATUS] = 'Excluído';
+          out[NEW_MOTIVO] = row._iaMotivo;
+        } else {
+          out[NEW_STATUS] = 'Incluído';
+          out[NEW_MOTIVO] = '';
+        }
       }
       return out;
     });
 
     const ws = XLSX.utils.json_to_sheet(markedRows, { header: fullHeaders });
-    // Widths: original cols auto, new cols fixed
     ws['!cols'] = [
       ...r.headers.map(h => ({ wch: Math.min(Math.max(String(h).length + 4, 12), 60) })),
-      { wch: 18 }, // Status_ferramenta
-      { wch: 25 }  // Motivo_ferramenta
+      { wch: 18 }, { wch: 25 }
     ];
     XLSX.utils.book_append_sheet(wb, ws, r.sheetName.substring(0, 31));
   });
