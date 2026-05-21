@@ -306,7 +306,7 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
           <circle cx="10" cy="10" r="8"/><path d="M10 6v4l3 3"/>
         </svg>
       </div>
-      <span class="logo-txt">Origin <span>Health v24</span></span>
+      <span class="logo-txt">Origin <span>Health v25</span></span>
     </div>
     <h1>Acesso à plataforma</h1>
     <p class="sub">Ferramentas de inteligência para pesquisa em saúde</p>
@@ -776,13 +776,20 @@ function normTitle(t) {
 function titleSimilarity(a, b) {
   a = normTitle(a); b = normTitle(b);
   if (!a || !b) return 0;
-  const la = a.length, lb = b.length;
-  if (Math.abs(la - lb) > Math.max(la, lb) * 0.5) return 0;
-  // LCS-based similarity
-  let matches = 0;
-  const wordsA = new Set(a.split(' '));
-  for (const w of b.split(' ')) { if (wordsA.has(w) && w.length > 2) matches++; }
-  return (2 * matches) / (a.split(' ').length + b.split(' ').length);
+  if (a === b) return 1;
+  // Word-level Dice coefficient (bigrams for better accuracy)
+  const wordsA = a.split(' ').filter(w => w.length > 2);
+  const wordsB = b.split(' ').filter(w => w.length > 2);
+  if (!wordsA.length || !wordsB.length) return 0;
+  const setA = new Set(wordsA);
+  const setB = new Set(wordsB);
+  let intersection = 0;
+  for (const w of setA) { if (setB.has(w)) intersection++; }
+  // Dice: 2|A∩B| / (|A|+|B|)
+  const dice = (2 * intersection) / (setA.size + setB.size);
+  // Also check prefix similarity (first 60 chars)
+  const prefixSim = a.substring(0,60) === b.substring(0,60) ? 1 : 0;
+  return Math.max(dice, prefixSim * 0.9);
 }
 
 function isConference(rec) {
@@ -1584,18 +1591,43 @@ async function runDedup() {
     }
 
     // 3. Decide which to remove (prefer journal over conference)
-    const removeIdx = new Set();
+    // Use union-find: each cluster of duplicates keeps exactly ONE representative
+    const parent = Array.from({length: allRecordsFlat.length}, (_,i) => i);
+    const isConf  = allRecordsFlat.map(r => isConference(r));
+
+    function find(x) { return parent[x] === x ? x : (parent[x] = find(parent[x])); }
+
+    // For each pair, decide which becomes the representative of the cluster
     const pairDetails = [];
     for (const p of pairs) {
-      const a = allRecordsFlat[p.i], b = allRecordsFlat[p.j];
-      const aConf = isConference(a), bConf = isConference(b);
-      let decision, removeJ;
-      if (aConf && !bConf)      { decision = 'Manter B — journal sobre conferência'; removeJ = p.i; }
-      else if (bConf && !aConf) { decision = 'Manter A — journal sobre conferência'; removeJ = p.j; }
-      else                      { decision = 'Manter A — primeiro encontrado';        removeJ = p.j; }
-      if (!removeIdx.has(p.i)) removeIdx.add(removeJ);
-      pairDetails.push({ ...p, aTitle: a['Título'], bTitle: b['Título'],
-        aConf, bConf, aFonte: a.Fonte, bFonte: b.Fonte, decision });
+      const ra = find(p.i), rb = find(p.j);
+      if (ra === rb) {
+        // Already in same cluster — just record for display
+        pairDetails.push({ ...p,
+          aTitle: allRecordsFlat[p.i]['Título'], bTitle: allRecordsFlat[p.j]['Título'],
+          aConf: isConf[p.i], bConf: isConf[p.j],
+          aFonte: allRecordsFlat[p.i].Fonte, bFonte: allRecordsFlat[p.j].Fonte,
+          decision: 'Já agrupados', keepIdx: ra, removeJ: rb === ra ? p.j : p.i });
+        continue;
+      }
+      // Prefer journal over conference as representative
+      let keep, remove, decision;
+      if (isConf[ra] && !isConf[rb])      { keep = rb; remove = ra; decision = 'Manter ' + allRecordsFlat[rb].Fonte + ' (journal)'; }
+      else if (isConf[rb] && !isConf[ra]) { keep = ra; remove = rb; decision = 'Manter ' + allRecordsFlat[ra].Fonte + ' (journal)'; }
+      else                                { keep = ra; remove = rb; decision = 'Manter primeiro encontrado'; }
+      // Merge clusters: point remove's root to keep
+      parent[remove] = keep;
+      pairDetails.push({ ...p,
+        aTitle: allRecordsFlat[p.i]['Título'], bTitle: allRecordsFlat[p.j]['Título'],
+        aConf: isConf[p.i], bConf: isConf[p.j],
+        aFonte: allRecordsFlat[p.i].Fonte, bFonte: allRecordsFlat[p.j].Fonte,
+        decision, keepIdx: keep, removeJ: remove });
+    }
+
+    // Mark for removal: all records whose root is not themselves
+    const removeIdx = new Set();
+    for (let i = 0; i < allRecordsFlat.length; i++) {
+      if (find(i) !== i) removeIdx.add(i);
     }
 
     // 4. Build cleaned records list
@@ -1684,15 +1716,21 @@ function renderPairsSection(pairs, idx) {
       '<span class="pair-sim ' + simCls + '">' + p.sim + '% similar</span>';
     const barW = Math.min(100, p.sim);
     const barCls = p.sim >= 90 ? '' : 'warn';
+    // Which is kept vs removed
+    const aKept = p.keepIdx === p.i || (!p.aConf && p.bConf) || (!p.aConf && !p.bConf && p.keepIdx !== p.j);
+    const aLabel = '<span style="font-size:10px;padding:1px 5px;border-radius:3px;margin-left:4px;' +
+      (aKept!==false ? 'background:rgba(74,207,120,.2);color:var(--green)">✓ manter' : 'background:var(--danger-bg);color:var(--danger)">✕ remover') + '</span>';
+    const bLabel = '<span style="font-size:10px;padding:1px 5px;border-radius:3px;margin-left:4px;' +
+      (aKept!==false ? 'background:var(--danger-bg);color:var(--danger)">✕ remover' : 'background:rgba(74,207,120,.2);color:var(--green)">✓ manter') + '</span>';
     html += '<div class="pair-item">' +
       simLabel +
-      (p.doiMatch ? '' : '<div class="sim-bar-wrap"><div class="sim-bar"><div class="sim-bar-fill ' + barCls + '" style="width:' + barW + '%"></div></div></div>') +
-      '<span class="pair-title">' +
-        '<b>' + (p.aFonte||'') + ':</b> ' + String(p.aTitle||'').substring(0,100) +
-        (p.aConf ? '<span class="conf-badge">Conferência</span>' : '') +
-        '<br><b>' + (p.bFonte||'') + ':</b> ' + String(p.bTitle||'').substring(0,100) +
-        (p.bConf ? '<span class="conf-badge">Conferência</span>' : '') +
-      '</span>' +
+      (p.doiMatch ? '' : ' <div class="sim-bar-wrap" style="display:inline-flex"><div class="sim-bar"><div class="sim-bar-fill ' + barCls + '" style="width:' + barW + '%"></div></div></div>') +
+      '<div class="pair-title" style="margin-top:6px">' +
+        '<div><b>' + (p.aFonte||'') + '</b>' + aLabel + ' ' + String(p.aTitle||'').substring(0,110) +
+        (p.aConf ? '<span class="conf-badge">Conferência</span>' : '') + '</div>' +
+        '<div style="margin-top:4px"><b>' + (p.bFonte||'') + '</b>' + bLabel + ' ' + String(p.bTitle||'').substring(0,110) +
+        (p.bConf ? '<span class="conf-badge">Conferência</span>' : '') + '</div>' +
+      '</div>' +
       '<div class="pair-decision' + (isJournalPromo ? ' journal' : '') + '">' + (p.decision||'') + '</div>' +
     '</div>';
   }
@@ -1731,7 +1769,7 @@ function buildBlock(pr, idx) {
       <div class="stats-grid" style="grid-template-columns:repeat(5,1fr)">
         <div class="stat"><div class="stat-val">${tOrig}</div><div class="stat-lbl">Originais</div></div>
         <div class="stat"><div class="stat-val r">−${tDupKey}</div><div class="stat-lbl">Dup. por DOI</div></div>
-        <div class="stat"><div class="stat-val r">−${tDupTit}</div><div class="stat-lbl">Dup. por Título (≥80%)</div></div>
+        <div class="stat"><div class="stat-val r">−${tDupTit}</div><div class="stat-lbl">Dup. por similaridade</div></div>
         <div class="stat" id="stat-kept-${idx}"><div class="stat-val g" id="kept-val-${idx}">${tKept}</div><div class="stat-lbl" id="kept-lbl-${idx}">Mantidos (−${pct}%)</div></div>
         <div class="stat" id="stat-ia-${idx}"><div class="stat-val r" id="ia-val-${idx}">−0</div><div class="stat-lbl">Excluídos pela IA</div></div>
       </div>
