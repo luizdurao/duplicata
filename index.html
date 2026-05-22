@@ -1609,7 +1609,8 @@ async function runDedup() {
   try {
     // 1. Parse all files into records
     document.getElementById('proc-msg').textContent = 'Lendo e convertendo arquivos…';
-    const allRecordsFlat = [];
+    window._allRecordsFlat = [];
+    const allRecordsFlat = window._allRecordsFlat;
     for (const file of files) {
       const recs = await fileToRecords(file);
       allRecordsFlat.push(...recs);
@@ -1803,7 +1804,7 @@ function renderPairsSection(pairs, idx) {
         (p.aConf ? '<span class="conf-badge">Conferência</span>' : '') + '</div>' +
         '<div style="margin-top:4px"><b>' + (p.bFonte||'') + '</b>' + bLabel + ' ' + String(p.bTitle||'').substring(0,110) +
         (p.bConf ? '<span class="conf-badge">Conferência</span>' : '') + '</div>' +
-        (p.doiMatch ? '<div style="font-size:10px;color:var(--text3);margin-top:3px">DOI: ' + (allRecordsFlat?.[p.i]?.DOI || '') + '</div>' : '') +
+        (p.doiMatch ? '<div style="font-size:10px;color:var(--text3);margin-top:3px">DOI: ' + ((window._allRecordsFlat||[])[p.i]?.DOI || '') + '</div>' : '') +
       '</div>' +
       '<div class="pair-decision' + (isJournalPromo ? ' journal' : '') + '">' + (p.decision||'') + '</div>' +
     '</div>';
