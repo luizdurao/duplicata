@@ -423,6 +423,27 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
           <input type="checkbox" id="also-title" checked>
           <span>Também remover quando apenas o Título coincide (quando DOI está ausente)</span>
         </div>
+        <div style="margin-top:12px;display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="og">
+            <label>Threshold de similaridade</label>
+            <div style="display:flex;align-items:center;gap:10px;margin-top:6px">
+              <input type="range" id="sim-threshold" min="75" max="100" value="90" step="1"
+                style="accent-color:var(--green);cursor:pointer;flex:1"
+                oninput="document.getElementById('sim-val').textContent=this.value+'%'">
+              <span id="sim-val" style="font-size:14px;font-weight:700;color:var(--green);min-width:38px">90%</span>
+            </div>
+            <div style="font-size:11px;color:var(--text3);margin-top:4px">Títulos acima deste % são considerados duplicatas</div>
+          </div>
+          <div class="og">
+            <label>Base preferida (manter quando duplicado)</label>
+            <select id="preferred-source" style="width:100%;padding:9px 11px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:'Inter',sans-serif;font-size:13px;outline:none">
+              <option value="auto">Automático (journal > conferência)</option>
+              <option value="PubMed">Sempre manter PubMed</option>
+              <option value="Embase">Sempre manter Embase</option>
+              <option value="first">Manter primeiro encontrado</option>
+            </select>
+          </div>
+        </div>
         <div style="margin-top:14px">
           <div style="font-size:10px;font-weight:500;color:var(--text2);letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px">Motivos de exclusão</div>
           <div class="motivos-grid" id="motivos-tags"></div>
@@ -1607,10 +1628,11 @@ async function runDedup() {
         const db = String(b.DOI || '').toLowerCase().trim();
         const doiExact = da && db && da !== 'nan' && db !== 'nan' && da === db;
         const sim = titleSimilarity(a['Título'], b['Título']);
-        // DOI match only counts if titles also similar (≥0.70) — prevents conference
-        // supplement DOIs (same DOI for many different abstracts) from false grouping
+        // Get user-defined threshold (default 90%)
+        const thresh = (parseInt(document.getElementById('sim-threshold')?.value) || 90) / 100;
+        // DOI match requires title similarity ≥ 0.70 to avoid conference supplement DOIs
         const doiMatch = doiExact && sim >= 0.70;
-        if (doiMatch || sim >= 0.80) {
+        if (doiMatch || sim >= thresh) {
           pairs.push({ i, j, doiMatch, doiExact, sim: Math.round(sim * 100) });
         }
       }
@@ -1637,10 +1659,20 @@ async function runDedup() {
         continue;
       }
       // Prefer journal over conference as representative
+      const prefSource = document.getElementById('preferred-source')?.value || 'auto';
       let keep, remove, decision;
+      // Journal always wins over conference regardless of preference
       if (isConf[ra] && !isConf[rb])      { keep = rb; remove = ra; decision = 'Manter ' + allRecordsFlat[rb].Fonte + ' (journal)'; }
       else if (isConf[rb] && !isConf[ra]) { keep = ra; remove = rb; decision = 'Manter ' + allRecordsFlat[ra].Fonte + ' (journal)'; }
-      else                                { keep = ra; remove = rb; decision = 'Manter primeiro encontrado'; }
+      else if (prefSource === 'PubMed') {
+        const aIsPub = allRecordsFlat[ra].Fonte === 'PubMed';
+        keep = aIsPub ? ra : rb; remove = aIsPub ? rb : ra;
+        decision = 'Manter PubMed';
+      } else if (prefSource === 'Embase') {
+        const aIsEmb = allRecordsFlat[ra].Fonte === 'Embase';
+        keep = aIsEmb ? ra : rb; remove = aIsEmb ? rb : ra;
+        decision = 'Manter Embase';
+      } else { keep = ra; remove = rb; decision = 'Manter primeiro encontrado'; }
       // Merge clusters: point remove's root to keep
       parent[remove] = keep;
       pairDetails.push({ ...p,
@@ -1656,8 +1688,23 @@ async function runDedup() {
       if (find(i) !== i) removeIdx.add(i);
     }
 
+    // Verify: every removed record has its representative NOT removed
+    // If representative was already removed by a prior pair, promote next available
+    for (let i = 0; i < allRecordsFlat.length; i++) {
+      const root = find(i);
+      if (i !== root && removeIdx.has(root)) {
+        // Root was removed — promote i as new representative
+        removeIdx.delete(i);
+        removeIdx.add(root);
+        parent[root] = i; // update tree
+      }
+    }
+
     // 4. Build cleaned records list
     const cleanRecords = allRecordsFlat.filter((_,i) => !removeIdx.has(i));
+    
+    // Sanity check: total should be conserved
+    console.log('Dedup: ' + allRecordsFlat.length + ' → ' + cleanRecords.length + ' kept, ' + removeIdx.size + ' removed');
 
     // 5. Build a single processedResult for the pipeline
     const headers = ['Primeiro Autor','Ano','Título','Resumo','Fonte','Tipo de Publicação','Idioma','DOI'];
@@ -1756,6 +1803,7 @@ function renderPairsSection(pairs, idx) {
         (p.aConf ? '<span class="conf-badge">Conferência</span>' : '') + '</div>' +
         '<div style="margin-top:4px"><b>' + (p.bFonte||'') + '</b>' + bLabel + ' ' + String(p.bTitle||'').substring(0,110) +
         (p.bConf ? '<span class="conf-badge">Conferência</span>' : '') + '</div>' +
+        (p.doiMatch ? '<div style="font-size:10px;color:var(--text3);margin-top:3px">DOI: ' + (allRecordsFlat?.[p.i]?.DOI || '') + '</div>' : '') +
       '</div>' +
       '<div class="pair-decision' + (isJournalPromo ? ' journal' : '') + '">' + (p.decision||'') + '</div>' +
     '</div>';
