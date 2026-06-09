@@ -306,7 +306,7 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
           <circle cx="10" cy="10" r="8"/><path d="M10 6v4l3 3"/>
         </svg>
       </div>
-      <span class="logo-txt">Origin <span>Health</span></span>
+      <span class="logo-txt">Origin <span>Health v. 30</span></span>
     </div>
     <h1>Acesso à plataforma</h1>
     <p class="sub">Ferramentas de inteligência para pesquisa em saúde</p>
@@ -364,7 +364,7 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
     <div class="ph">
       <div class="eyebrow">Ferramenta de dados</div>
       <div class="ptitle">Deduplicador de Planilhas</div>
-      <p class="pdesc">Carregue arquivos de qualquer base (.nbib do PubMed, .xlsx do Embase). A ferramenta converte, unifica, calcula similaridade entre títulos, prioriza artigos em journal sobre conferências, e usa IA para sugerir motivos de exclusão.</p>
+      <p class="pdesc">Carregue arquivos de qualquer base (.nbib do PubMed, .xlsx do Embase, .ris/.bib de outras bases). A ferramenta converte, unifica, calcula similaridade entre títulos, prioriza artigos em journal sobre conferências, e usa IA para sugerir motivos de exclusão.</p>
     </div>
 
     <!-- Upload -->
@@ -383,8 +383,8 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
             <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M12 18v-6M9 15l3-3 3 3"/>
           </svg>
           <p>Arraste arquivos aqui ou clique para selecionar</p>
-          <small>Suporta .xlsx (Embase), .nbib (PubMed), .ris — múltiplos arquivos de bases diferentes</small>
-          <input type="file" id="fi" accept=".xlsx,.xls,.nbib,.ris,.txt" multiple>
+          <small>Suporta .xlsx (Embase), .nbib (PubMed), .ris/.rir/.bib — múltiplos arquivos de bases diferentes</small>
+          <input type="file" id="fi" accept=".xlsx,.xls,.nbib,.ris,.rir,.bib,.txt" multiple>
         </div>
         <div class="flist" id="flist"></div>
       </div>
@@ -747,6 +747,49 @@ function parseEmbaseXLSX(sheetRows) {
   });
 }
 
+
+function parseBIB(text) {
+  const records = [];
+  // Split on @type{ entries
+  const entries = text.split(/(?=@[a-zA-Z]+\s*\{)/);
+  for (const entry of entries) {
+    if (!entry.trim() || entry.trim().startsWith('%')) continue;
+    const typeMatch = entry.match(/^@([a-zA-Z]+)\s*\{([^,]+),/);
+    if (!typeMatch) continue;
+    const pubType = typeMatch[1].toLowerCase();
+    if (pubType === 'string' || pubType === 'preamble' || pubType === 'comment') continue;
+
+    // Extract fields
+    const getField = (key) => {
+      const m = entry.match(new RegExp(key + '\\s*=\\s*[\\{"]([\\s\\S]*?)[\\}"]\\s*[,\\}]', 'i'));
+      if (!m) return '';
+      return m[1].replace(/[{}]/g, '').replace(/\s+/g, ' ').trim();
+    };
+
+    const title   = getField('title');
+    const authors = getField('author');
+    const year    = getField('year') || getField('date').substring(0,4);
+    const doi     = getField('doi');
+    const abstract = getField('abstract');
+    const lang    = getField('language');
+
+    // First author surname
+    const firstAuthor = authors ? authors.split(/and|,/)[0].trim().split(/[,\s]/)[0] : '';
+
+    records.push({
+      'Primeiro Autor': firstAuthor,
+      'Ano': year,
+      'Título': title,
+      'Resumo': abstract,
+      'DOI': doi,
+      'Tipo de Publicação': pubType,
+      'Idioma': lang,
+      'Fonte': 'BibTeX'
+    });
+  }
+  return records;
+}
+
 async function fileToRecords(file) {
   const name = file.name.toLowerCase();
   return new Promise((res, rej) => {
@@ -754,8 +797,11 @@ async function fileToRecords(file) {
     if (name.endsWith('.nbib') || name.endsWith('.txt')) {
       reader.onload = e => res(parseNBIB(e.target.result));
       reader.readAsText(file, 'utf-8');
-    } else if (name.endsWith('.ris')) {
+    } else if (name.endsWith('.ris') || name.endsWith('.rir')) {
       reader.onload = e => res(parseRIS(e.target.result));
+      reader.readAsText(file, 'utf-8');
+    } else if (name.endsWith('.bib')) {
+      reader.onload = e => res(parseBIB(e.target.result));
       reader.readAsText(file, 'utf-8');
     } else {
       // Excel — detect by columns
