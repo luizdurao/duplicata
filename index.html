@@ -306,7 +306,7 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
           <circle cx="10" cy="10" r="8"/><path d="M10 6v4l3 3"/>
         </svg>
       </div>
-      <span class="logo-txt">Origin <span>Health v.32</span></span>
+      <span class="logo-txt">Origin <span>Health v.33</span></span>
     </div>
     <h1>Acesso à plataforma</h1>
     <p class="sub">Ferramentas de inteligência para pesquisa em saúde</p>
@@ -1645,7 +1645,7 @@ function downloadFull(idx) {
 
     const markedRows = allRows.map(row => {
       const out = {...row};
-      delete out._src; delete out._li; delete out._reason; delete out._iaMotivo;
+      delete out._src; delete out._li; delete out._reason; delete out._iaMotivo; delete out._baseTipo;
 
       if (row._src === 'removed') {
         out[NEW_STATUS] = 'Excluído';
@@ -1694,6 +1694,11 @@ async function runDedup() {
     const allRecordsFlat = window._allRecordsFlat;
     for (const file of files) {
       const recs = await fileToRecords(file);
+      // Set Fonte = nome do arquivo; keep parser type as _baseTipo
+      recs.forEach(r => {
+        r._baseTipo = r.Fonte;        // 'PubMed' / 'RIS' / 'Embase' / 'BibTeX'
+        r.Fonte = file.name;          // nome real do arquivo
+      });
       allRecordsFlat.push(...recs);
     }
 
@@ -1747,11 +1752,11 @@ async function runDedup() {
       if (isConf[ra] && !isConf[rb])      { keep = rb; remove = ra; decision = 'Manter ' + allRecordsFlat[rb].Fonte + ' (journal)'; }
       else if (isConf[rb] && !isConf[ra]) { keep = ra; remove = rb; decision = 'Manter ' + allRecordsFlat[ra].Fonte + ' (journal)'; }
       else if (prefSource === 'PubMed') {
-        const aIsPub = allRecordsFlat[ra].Fonte === 'PubMed';
+        const aIsPub = allRecordsFlat[ra]._baseTipo === 'PubMed';
         keep = aIsPub ? ra : rb; remove = aIsPub ? rb : ra;
         decision = 'Manter PubMed';
       } else if (prefSource === 'Embase') {
-        const aIsEmb = allRecordsFlat[ra].Fonte === 'Embase';
+        const aIsEmb = allRecordsFlat[ra]._baseTipo === 'Embase';
         keep = aIsEmb ? ra : rb; remove = aIsEmb ? rb : ra;
         decision = 'Manter Embase';
       } else { keep = ra; remove = rb; decision = 'Manter primeiro encontrado'; }
