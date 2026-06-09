@@ -306,7 +306,7 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
           <circle cx="10" cy="10" r="8"/><path d="M10 6v4l3 3"/>
         </svg>
       </div>
-      <span class="logo-txt">Origin <span>Health v. 30</span></span>
+      <span class="logo-txt">Origin <span>Health v31</span></span>
     </div>
     <h1>Acesso à plataforma</h1>
     <p class="sub">Ferramentas de inteligência para pesquisa em saúde</p>
@@ -877,9 +877,15 @@ function renderFiles() {
   list.innerHTML = '';
   files.forEach((f, i) => {
     const d = document.createElement('div'); d.className = 'fitem';
+    const ext = f.name.split('.').pop().toLowerCase();
+    const badge = ext === 'nbib' ? '<span class="source-badge source-pubmed">PubMed</span>' :
+                  (ext === 'ris' || ext === 'rir') ? '<span class="source-badge source-embase">RIS</span>' :
+                  ext === 'bib'  ? '<span class="source-badge source-embase">BibTeX</span>' :
+                                   '<span class="source-badge source-merged">Excel</span>';
     d.innerHTML = `
       <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>
       <span class="fitem-name">${f.name}</span>
+      ${badge}
       <span class="fitem-size">${(f.size/1024).toFixed(0)} KB</span>
       <div class="fitem-rm" onclick="removeFile(${i})">
         <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
