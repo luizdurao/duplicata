@@ -306,7 +306,7 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
           <circle cx="10" cy="10" r="8"/><path d="M10 6v4l3 3"/>
         </svg>
       </div>
-      <span class="logo-txt">Origin <span>Health v31</span></span>
+      <span class="logo-txt">Origin <span>Health v.32</span></span>
     </div>
     <h1>Acesso à plataforma</h1>
     <p class="sub">Ferramentas de inteligência para pesquisa em saúde</p>
@@ -706,24 +706,53 @@ function parseRIS(text) {
   const records = [];
   let current = null;
   for (const line of text.split(/\r?\n/)) {
-    const m = line.match(/^([A-Z0-9]{2})\s+-\s+(.*)/);
+    // RIS tags: 2 uppercase chars, then 2 spaces, dash, space (or 1 space dash space)
+    const m = line.match(/^([A-Z0-9]{2})\s{1,2}-\s*(.*)/);
     if (m) {
-      if (m[1] === 'TY') { current = {}; }
-      if (!current) continue;
       const tag = m[1], val = m[2].trim();
-      if (current[tag]) current[tag] += ' ' + val;
-      else current[tag] = val;
-    } else if (line.trim() === 'ER  -' && current) {
-      const yr = (current.PY || current.Y1 || '').match(/\d{4}/);
-      const fau = current.A1 || current.AU || '';
-      const fa = fau.split(',')[0].trim().split(' ')[0];
-      records.push({
-        'Primeiro Autor': fa, 'Ano': yr ? yr[0] : '',
-        'Título': current.TI || current.T1 || '', 'Resumo': current.AB || current.N2 || '',
-        'DOI': current.DO || current.M3 || '', 'Tipo de Publicação': current.TY || '',
-        'Idioma': current.LA || '', 'Fonte': 'RIS'
-      });
-      current = null;
+      if (tag === 'TY') { current = {}; }
+      if (!current) continue;
+      if (tag === 'ER') {
+        // End of record
+        const yr = (current.PY || current.Y1 || current.DA || '').match(/\d{4}/);
+        // First author: try AU first, then A1
+        const auList = current._AU || [];
+        const fa = auList.length ? auList[0].split(',')[0].trim().split(/[\s.]/)[0] : '';
+        // Concatenate multiple AB fields
+        const ab = (current._AB || []).join(' ').trim();
+        // Decode HTML entities
+        const decode = s => s.replace(/&#(\d+);/g, (_,n) => String.fromCharCode(n))
+                              .replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>');
+        records.push({
+          'Primeiro Autor': fa,
+          'Ano': yr ? yr[0] : '',
+          'Título': decode(current.TI || current.T1 || ''),
+          'Resumo': decode(ab || current.N2 || ''),
+          'DOI': current.DO || current.M3 || '',
+          'Tipo de Publicação': current.TY || '',
+          'Idioma': current.LA || '',
+          'Fonte': 'RIS'
+        });
+        current = null;
+      } else {
+        // Multi-value fields
+        if (tag === 'AU' || tag === 'A1') {
+          if (!current._AU) current._AU = [];
+          current._AU.push(val);
+        } else if (tag === 'AB' || tag === 'N2') {
+          if (!current._AB) current._AB = [];
+          current._AB.push(val);
+        } else if (tag === 'KW' || tag === 'MH') {
+          // skip keywords
+        } else {
+          // Single value (keep first occurrence for most fields)
+          if (!current[tag]) current[tag] = val;
+          else current[tag] += ' ' + val; // continuation lines
+        }
+      }
+    } else if (current && line.trim() && !line.match(/^[A-Z0-9]{2}\s/)) {
+      // Continuation line (indented or no tag) — append to last field
+      // (some RIS files wrap long values)
     }
   }
   return records;
