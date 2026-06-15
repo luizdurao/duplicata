@@ -306,7 +306,7 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
           <circle cx="10" cy="10" r="8"/><path d="M10 6v4l3 3"/>
         </svg>
       </div>
-      <span class="logo-txt">Origin <span>Health v.33</span></span>
+      <span class="logo-txt">Origin <span>Health v35</span></span>
     </div>
     <h1>Acesso à plataforma</h1>
     <p class="sub">Ferramentas de inteligência para pesquisa em saúde</p>
@@ -322,18 +322,15 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
     <div class="l-err" id="l-err">E-mail ou senha incorretos.</div>
 
     <div class="l-divider"></div>
-    <div class="l-section-title">Configuração do proxy IA (opcional)</div>
+    <div class="l-section-title">Configuração da IA (opcional)</div>
     <div class="field">
-      <label>URL do Google Apps Script (proxy IA)</label>
+      <label>Chave da API Gemini</label>
       <div class="worker-row">
-        <input type="url" id="worker-url" placeholder="https://script.google.com/macros/s/SEU_ID/exec" autocomplete="off">
-        <button class="btn-save" onclick="saveWorkerUrl()">Salvar</button>
+        <input type="password" id="gemini-key" placeholder="AIza..." autocomplete="off">
+        <button class="btn-save" onclick="saveGeminiKey()">Salvar</button>
       </div>
-      <div class="hint">Cole a URL do Google Apps Script. <a href="https://script.google.com" target="_blank" style="color:var(--green)">Criar script gratuito →</a></div>
-      <div style="display:flex;gap:8px;margin-top:8px">
-        <button class="btn-save" style="font-size:11px;padding:6px 12px" onclick="testWorker()">Testar conexão</button>
-      </div>
-      <div class="worker-status" id="worker-status">Não configurado — IA ficará desativada</div>
+      <div class="hint">Cole sua chave da API Gemini. <a href="https://aistudio.google.com/apikey" target="_blank" style="color:var(--green)">Obter chave →</a> A chave fica salva apenas no seu navegador.</div>
+      <div class="worker-status" id="worker-status">Não configurada — IA ficará desativada</div>
     </div>
 
     <p class="l-hint">Demo: <b>demo@origin.com</b> / <b>origin2026</b></p>
@@ -455,7 +452,7 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
         </div>
         <div class="ai-toggle" onclick="toggleAI()" id="ai-toggle">
           <span class="ai-badge">IA</span>
-          <span class="ai-toggle-txt"><b>Classificação de motivos com IA (Gemini)</b> — via Google Apps Script</span>
+          <span class="ai-toggle-txt"><b>Classificação de motivos com IA (Gemini)</b> — chamada direta à API</span>
           <div class="sw on" id="ai-sw"><div class="knob"></div></div>
         </div>
         <div class="eleg-field" id="eleg-field">
@@ -496,56 +493,26 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
 const USERS = { 'demo@origin.com': 'origin2026', 'admin@originhealth.com.br': 'origin@2026' };
 let currentUser = null, aiEnabled = true, files = [], processedResults = [];
 
-function normalizeWorkerUrl(raw) {
-  // Keep URL as-is, just trim whitespace and trailing slash
-  return raw.trim().replace(/\/$/, '');
+function saveGeminiKey() {
+  const raw = document.getElementById('gemini-key').value.trim();
+  if (!raw) { alert('Cole a chave da API.'); return; }
+  localStorage.setItem('gemini_key', raw);
+  updateGeminiStatus();
+  alert('Chave salva! A IA está habilitada.');
 }
 
-function saveWorkerUrl() {
-  const raw = document.getElementById('worker-url').value.trim();
-  const st  = document.getElementById('worker-status');
-  if (!raw) { st.textContent = 'Cole a URL antes de salvar.'; st.className = 'worker-status err'; return; }
-  if (!raw.startsWith('https://')) { st.textContent = 'URL deve começar com https://'; st.className = 'worker-status err'; return; }
-  const url = normalizeWorkerUrl(raw);
-  document.getElementById('worker-url').value = url;
-  localStorage.setItem('worker_url', url);
-  st.textContent = '✓ URL salva — clique em Testar conexão para verificar'; st.className = 'worker-status ok';
+function updateGeminiStatus() {
+  const key = localStorage.getItem('gemini_key');
+  const st = document.getElementById('worker-status');
+  if (st) st.textContent = key ? '✓ Chave configurada — IA habilitada' : 'Não configurada — IA ficará desativada';
 }
 
-async function testWorker() {
-  const raw = document.getElementById('worker-url').value.trim();
-  const st  = document.getElementById('worker-status');
-  if (!raw) { st.textContent = 'Cole a URL primeiro.'; st.className = 'worker-status err'; return; }
-  const url = normalizeWorkerUrl(raw);
-  st.textContent = '⏳ Testando conexão…'; st.className = 'worker-status';
-  try {
-    const resp = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(8000) });
-    const data = await resp.json();
-    if (data.ok) {
-      st.textContent = '✓ Worker online e respondendo — IA pronta!'; st.className = 'worker-status ok';
-      localStorage.setItem('worker_url', url);
-    } else {
-      st.textContent = 'Worker respondeu mas retornou erro: ' + JSON.stringify(data); st.className = 'worker-status err';
-    }
-  } catch(e) {
-    if (e.name === 'TimeoutError') {
-      st.textContent = '✗ Timeout — Worker não respondeu em 8s. Verifique se foi deployado.'; st.className = 'worker-status err';
-    } else if (e.message.includes('fetch')) {
-      st.textContent = '✗ Failed to fetch — verifique se ALLOWED_ORIGIN inclui este domínio no Worker.'; st.className = 'worker-status err';
-    } else {
-      st.textContent = '✗ Erro: ' + e.message; st.className = 'worker-status err';
-    }
+function loadGeminiKey() {
+  const saved = localStorage.getItem('gemini_key');
+  if (saved && document.getElementById('gemini-key')) {
+    document.getElementById('gemini-key').value = saved;
   }
-}
-
-function loadWorkerUrl() {
-  const saved = localStorage.getItem('worker_url');
-  if (saved) {
-    document.getElementById('worker-url').value = saved;
-    document.getElementById('worker-status').textContent = '✓ URL configurada — IA habilitada';
-    document.getElementById('worker-status').className = 'worker-status ok';
-  }
-  return saved || null;
+  updateGeminiStatus();
 }
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -559,9 +526,9 @@ function doLogin() {
   setTimeout(() => {
     if (USERS[email] && USERS[email] === pass) {
       currentUser = email;
-      const workerUrl = loadWorkerUrl();
-      // Auto-disable AI if no worker configured
-      if (!workerUrl) {
+      const geminiKey = localStorage.getItem('gemini_key');
+      // Auto-disable AI if no key configured
+      if (!geminiKey) {
         aiEnabled = false;
         document.getElementById('ai-sw').classList.remove('on');
         document.getElementById('worker-warn').style.display = 'flex';
@@ -601,10 +568,10 @@ function doLogout() {
 
 document.getElementById('pass').addEventListener('keydown', e => { if (e.key==='Enter') doLogin(); });
 document.getElementById('email').addEventListener('keydown', e => { if (e.key==='Enter') document.getElementById('pass').focus(); });
-document.getElementById('worker-url').addEventListener('keydown', e => { if (e.key==='Enter') saveWorkerUrl(); });
+document.getElementById('gemini-key').addEventListener('keydown', e => { if (e.key==='Enter') saveGeminiKey(); });
 
 // Load saved URL on page open
-loadWorkerUrl();
+loadGeminiKey();
 
 // ── Files ─────────────────────────────────────────────────────────────────────
 const drop = document.getElementById('drop');
@@ -940,7 +907,7 @@ function removeFile(i) { files.splice(i, 1); renderFiles(); }
 
 // ── AI toggle ─────────────────────────────────────────────────────────────────
 function toggleAI() {
-  const workerUrl = localStorage.getItem('worker_url');
+  const workerUrl = localStorage.getItem('gemini_key');
   if (!aiEnabled && !workerUrl) {
     document.getElementById('worker-warn').style.display = 'flex'; return;
   }
@@ -1033,37 +1000,85 @@ function deduplicate(rows, headers) {
 }
 
 // ── AI via Google Apps Script ─────────────────────────────────────────────────
-async function callScript(payload) {
-  const scriptUrl = localStorage.getItem('worker_url');
-  if (!scriptUrl) throw new Error('URL do Apps Script não configurada.');
+// Direct Gemini API call from browser (CORS-enabled). Requires API key.
+const GEMINI_MODEL = 'gemini-2.0-flash-lite';
 
-  // Apps Script requires GET with ?data= to avoid CORS POST issues
-  const url = scriptUrl + '?data=' + encodeURIComponent(JSON.stringify(payload));
+async function callScript(payload) {
+  // payload.mode === 'classify' → build prompt and call Gemini directly
+  const apiKey = localStorage.getItem('gemini_key');
+  if (!apiKey) throw new Error('Chave da API Gemini não configurada.');
+
+  if (payload.mode !== 'classify') throw new Error('Modo não suportado: ' + payload.mode);
+
+  const prompt = buildClassifyPrompt(payload.articles, payload.elegibilidade, payload.motivos);
+  const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + GEMINI_MODEL + ':generateContent?key=' + apiKey;
+
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 45000);
+  const timeout = setTimeout(() => controller.abort(), 60000);
   let resp;
   try {
     resp = await fetch(url, {
-      method: 'GET',
-      redirect: 'follow',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { maxOutputTokens: 2048, temperature: 0.1 }
+      }),
       signal: controller.signal
     });
-  } finally {
-    clearTimeout(timeout);
+  } finally { clearTimeout(timeout); }
+
+  if (resp.status === 429) return { error: 'QUOTA_EXCEEDED: rate limit' };
+  if (resp.status === 503 || resp.status === 500) throw new Error('HTTP ' + resp.status);
+  if (!resp.ok) {
+    const errText = await resp.text();
+    return { error: 'Gemini HTTP ' + resp.status + ': ' + errText.substring(0,150) };
   }
-  const text = await resp.text();
-  if (!text || !text.trim()) throw new Error('Apps Script retornou resposta vazia.');
+
+  const data = await resp.json();
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  if (!text) return { error: 'Resposta vazia do Gemini.' };
+
+  // Parse JSON array from response
   try {
-    const data = JSON.parse(text);
-    if (data.error) throw new Error('Apps Script: ' + data.error);
-    return data;
+    let clean = text.replace(/```json/gi,'').replace(/```/g,'');
+    const start = clean.indexOf('[');
+    if (start === -1) throw new Error('sem array');
+    clean = clean.substring(start);
+    let result;
+    try {
+      const end = clean.lastIndexOf(']');
+      if (end > 0) result = JSON.parse(clean.substring(0, end+1));
+    } catch(_) {}
+    if (!result) {
+      const lastClose = clean.lastIndexOf('}');
+      if (lastClose > 0) result = JSON.parse(clean.substring(0, lastClose+1) + ']');
+    }
+    return { classifications: result };
   } catch(e) {
-    if (e.message.startsWith('Apps Script:')) throw e;
-    // Not JSON — show first 200 chars
-    // Show first 300 chars to help diagnose
-    const preview = text.replace(/<[^>]+>/g,'').trim().substring(0, 300);
-    throw new Error('Apps Script retornou texto inválido: ' + preview);
+    return { error: 'Parse: ' + text.substring(0,150) };
   }
+}
+
+function buildClassifyPrompt(articles, elegibilidade, motivos) {
+  const list = articles.map((a,i) =>
+    '[' + i + '] ' + (a.titulo || '(sem título)') +
+    (a.resumo ? '\nRESUMO: ' + a.resumo.substring(0,200) : '')
+  ).join('\n\n');
+
+  const motivosList = motivos ||
+    'duplicado, idioma, resumo, observacional, população, desfechos, intervenção, comparador, animais, in vitro, editorial, protocolo, relato de caso, outro tipo de revisão, fase I, errata, proceedings, consenso';
+
+  const elegCtx = elegibilidade ? '\n\nCRITÉRIO DE ELEGIBILIDADE:\n' + elegibilidade + '\n' : '';
+
+  return 'OUTPUT RULE: respond with ONLY a JSON array. No markdown, no explanation, no ``` blocks.' +
+    elegCtx + '\n\n' +
+    'Classify each article. Use field "just" (max 3 words). Motivos: incluir, ' + motivosList + '\n\n' +
+    'Rules (in order): congress abstract→resumo; not en/pt/es→idioma; editorial/letter/comment→editorial; ' +
+    'narrative review/guideline→outro tipo de revisão; case report→relato de caso; animal→animais; in vitro→in vitro; ' +
+    'phase I/PK healthy→fase I; observational→observacional; does not meet criteria→appropriate motivo; meets criteria→incluir; unclear→incluir\n\n' +
+    'Articles:\n' + list + '\n\n' +
+    '[{"index":0,"motivo":"incluir","just":"ECR vs IBP"},{"index":1,"motivo":"fase I","just":"PK saudáveis"}]';
 }
 
 async function getAIAnalysis(pr) {
@@ -1078,45 +1093,202 @@ async function getAIAnalysis(pr) {
   return data.text || '';
 }
 
+// Auto-exclude by publication type — returns motivo or null
+function autoExcludeByType(row, tipoCol) {
+  const tipo = tipoCol ? (row[tipoCol]||'').toString().toLowerCase() : '';
+  const RULES = [
+    ['conference abstract','resumo'], ['conference paper','resumo'], ['conference review','resumo'],
+    ['proceedings','proceedings'], ['editorial','editorial'], ['letter','editorial'],
+    ['note','editorial'], ['comment','editorial'], ['erratum','errata'], ['correction','errata'],
+    ['retraction','errata'], ['case report','relato de caso'], ['case reports','relato de caso']
+  ];
+  for (const [k, motivo] of RULES) { if (tipo.includes(k)) return motivo; }
+  return null;
+}
+
 async function getFuzzyDuplicates(pr) {
   let titleCol  = pr.results[0]?.titleCol;
   let resumoCol = pr.results[0]?.resumoCol;
   if (!titleCol && pr.results[0]?.headers?.length >= 4) titleCol = pr.results[0].headers[3];
   if (!titleCol) throw new Error('Coluna de título não detectada.');
 
+  const tipoCol = pr.results[0]?.headers?.find(h => {
+    const n = h.toString().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z]/g,'');
+    return n.includes('tipodepublicacao') || n.includes('publicationtype') || n.includes('tipo');
+  });
+
   const allRows = pr.results.flatMap(r => r.clean);
   pr._fuzzyMap  = allRows.map((_, i) => i);
 
-  const articles = allRows.map(row => ({
-    titulo: titleCol  ? (row[titleCol]  || '') : '',
-    resumo: resumoCol ? ((row[resumoCol] || '').substring(0, 180)) : ''
-  }));
+  // ── STEP 1: Pre-filter — auto-exclude by type, skip those in IA ─────────────
+  const autoExcluded = []; // {index, motivo}
+  const toClassify   = []; // {index, titulo, resumo}
+  allRows.forEach((row, i) => {
+    const autoMotivo = autoExcludeByType(row, tipoCol);
+    if (autoMotivo) {
+      autoExcluded.push({ index: i, motivo: autoMotivo, just: 'tipo de publicação' });
+    } else {
+      toClassify.push({
+        index: i,
+        titulo: titleCol  ? (row[titleCol]  || '') : '',
+        resumo: resumoCol ? ((row[resumoCol] || '').substring(0, 180)) : ''
+      });
+    }
+  });
 
-  const BATCH = 8;
-  const allClassifications = [];
-
-  // Send all articles in sequential batches
-  const total = articles.length;
-  // Show elegibility preview
   const elegPrev = document.getElementById('ia-eleg-preview');
   const elegVal = (document.getElementById('eleg-text')?.value || '').trim();
-  if (elegPrev) elegPrev.textContent = elegVal ? '📋 Critério: ' + elegVal.substring(0,120) + (elegVal.length>120?'…':'') : '⚠ Critério de elegibilidade não definido — usando regras padrão';
+  if (elegPrev) elegPrev.textContent =
+    (elegVal ? '📋 Critério aplicado. ' : '⚠ Sem critério — regras padrão. ') +
+    autoExcluded.length + ' excluídos automaticamente por tipo. ' +
+    toClassify.length + ' para classificar pela IA.';
 
-  for (let start = 0; start < total; start += BATCH) {
-    const batch = articles.slice(start, start + BATCH);
-    const progressEl = document.getElementById('ia-progress');
-    if (progressEl) progressEl.textContent = 'Classificando artigos ' + (start+1) + '–' + Math.min(start+BATCH, total) + ' de ' + total + '…';
+  // ── STEP 2: Parallel IA classification with quota handling ──────────────────
+  const BATCH = 15;
+  const CONCURRENCY = 15;
+  const elegText = elegVal;
+  const motivosList = getMotivos().filter(m => m && m !== 'incluir' && m !== 'duplicado').join(', ');
 
-    const elegText = (document.getElementById('eleg-text')?.value || '').trim();
-    const motivosList = getMotivos().filter(m => m && m !== 'incluir' && m !== 'duplicado').join(', ');
-    const data = await callScript({ mode: 'classify', articles: batch, elegibilidade: elegText, motivos: motivosList });
-    if (!data.classifications) throw new Error('Batch ' + start + ': ' + JSON.stringify(data).substring(0,150));
-    data.classifications.forEach(c => {
-      allClassifications.push({ ...c, index: c.index + start });
+  // Build batches; allow resuming from a saved index
+  const batches = [];
+  for (let s = 0; s < toClassify.length; s += BATCH) {
+    batches.push(toClassify.slice(s, s + BATCH));
+  }
+
+  const allClassifications = [...autoExcluded];
+  let done = 0;
+  const total = toClassify.length;
+  const progressEl = document.getElementById('ia-progress');
+
+  // Quota / abort handling
+  let quotaHit = false;            // becomes true when Gemini daily quota is exhausted
+  const pendingBatches = [];       // batches not yet classified (for resume)
+
+  function isQuotaError(msg) {
+    const m = (msg||'').toLowerCase();
+    return m.includes('quota') || m.includes('resource_exhausted') ||
+           m.includes('exhausted') || m.includes('429') ||
+           m.includes('limite') || m.includes('rate limit');
+  }
+
+  let batchIdx = 0;
+  async function worker() {
+    while (batchIdx < batches.length) {
+      if (quotaHit) {
+        // Stop pulling new work; record remaining as pending
+        const myIdx = batchIdx++;
+        pendingBatches.push(batches[myIdx]);
+        continue;
+      }
+      const myIdx = batchIdx++;
+      const batch = batches[myIdx];
+      const localToGlobal = batch.map(a => a.index);
+      const payloadArticles = batch.map(a => ({ titulo: a.titulo, resumo: a.resumo }));
+
+      let attempts = 0, success = false;
+      while (attempts < 2 && !success && !quotaHit) {
+        attempts++;
+        try {
+          const data = await callScript({ mode: 'classify', articles: payloadArticles, elegibilidade: elegText, motivos: motivosList });
+          if (data.error && isQuotaError(data.error)) { quotaHit = true; break; }
+          if (data.classifications) {
+            data.classifications.forEach(c => {
+              const globalIdx = localToGlobal[c.index];
+              if (globalIdx !== undefined) allClassifications.push({ ...c, index: globalIdx });
+            });
+            success = true;
+          }
+        } catch(e) {
+          if (isQuotaError(e.message)) { quotaHit = true; break; }
+          if (attempts >= 2) {
+            // Transient failure twice — leave as pending for manual retry
+            pendingBatches.push(batch);
+          }
+        }
+      }
+      if (quotaHit && !success) { pendingBatches.push(batch); }
+
+      done += batch.length;
+      if (progressEl) {
+        progressEl.textContent = quotaHit
+          ? '⚠ Cota da IA esgotada — ' + (total - done) + ' artigos pendentes (retome amanhã)'
+          : 'Classificando ' + Math.min(done, total) + ' de ' + total + ' (IA paralela)…';
+      }
+    }
+  }
+
+  await Promise.all(Array.from({length: Math.min(CONCURRENCY, batches.length)}, () => worker()));
+
+  // Save pending batches for resume
+  if (pendingBatches.length) {
+    pr._pendingClassify = pendingBatches.flat();
+    const flat = pendingBatches.flat();
+    // Mark pending articles so they aren't silently included
+    flat.forEach(a => {
+      if (!allClassifications.find(c => c.index === a.index)) {
+        allClassifications.push({ index: a.index, motivo: '', just: 'pendente IA', _pending: true });
+      }
     });
+    if (progressEl) {
+      progressEl.innerHTML = '⚠ <b>' + flat.length + ' artigos não classificados</b> (cota/erro da IA). ' +
+        '<button onclick="resumeClassification(0)" style="margin-left:8px;padding:5px 12px;background:var(--green-dim);border:1px solid var(--border2);border-radius:6px;color:var(--green);font-size:12px;cursor:pointer">Retomar classificação</button>';
+    }
   }
 
   return allClassifications;
+}
+
+// Resume classification of pending articles (after quota resets)
+async function resumeClassification(prIdx) {
+  const pr = processedResults[prIdx];
+  if (!pr || !pr._pendingClassify || !pr._pendingClassify.length) {
+    alert('Nenhum artigo pendente para classificar.');
+    return;
+  }
+  const pending = pr._pendingClassify;
+  const progressEl = document.getElementById('ia-progress');
+  const elegText = (document.getElementById('eleg-text')?.value || '').trim();
+  const motivosList = getMotivos().filter(m => m && m !== 'incluir' && m !== 'duplicado').join(', ');
+
+  const BATCH = 15, CONCURRENCY = 15;
+  const batches = [];
+  for (let s = 0; s < pending.length; s += BATCH) batches.push(pending.slice(s, s + BATCH));
+
+  let quotaHit = false, done = 0, batchIdx = 0;
+  const stillPending = [];
+  const fBox = document.querySelector('#fuzzy-' + prIdx);
+
+  async function worker() {
+    while (batchIdx < batches.length && !quotaHit) {
+      const batch = batches[batchIdx++];
+      const localToGlobal = batch.map(a => a.index);
+      try {
+        const data = await callScript({ mode: 'classify',
+          articles: batch.map(a => ({ titulo: a.titulo, resumo: a.resumo })),
+          elegibilidade: elegText, motivos: motivosList });
+        if (data.error && /quota|exhausted|429|limite/i.test(data.error)) { quotaHit = true; stillPending.push(...batch); break; }
+        if (data.classifications) {
+          data.classifications.forEach(c => {
+            const gi = localToGlobal[c.index];
+            if (gi !== undefined && reviewState[prIdx]) {
+              // Update reviewState directly
+              reviewState[prIdx][gi] = { motivo: c.motivo||'', justificativa: c.justificativa||c.just||'', confirmed:false, iaSource:true };
+            }
+          });
+        }
+      } catch(e) { stillPending.push(...batch); }
+      done += batch.length;
+      if (progressEl) progressEl.textContent = 'Retomando: ' + done + ' de ' + pending.length + '…';
+    }
+  }
+  await Promise.all(Array.from({length: CONCURRENCY}, () => worker()));
+
+  pr._pendingClassify = stillPending;
+  // Re-render the review table
+  if (fBox) renderFuzzyResults(fBox, [], pr, prIdx);
+  if (progressEl) progressEl.textContent = stillPending.length
+    ? '⚠ Ainda ' + stillPending.length + ' pendentes (cota). Tente mais tarde.'
+    : '✓ Todos classificados!';
 }
 
 
@@ -1485,24 +1657,25 @@ function applyIAExclusion(prIdx, realIdx, itemIdx, motivo) {
 
 
 function forceUpdateUrl() {
-  const newUrl = prompt('Cole a URL do Apps Script:', localStorage.getItem('worker_url') || '');
-  if (newUrl && newUrl.trim().startsWith('https://')) {
-    localStorage.setItem('worker_url', newUrl.trim().replace(/\/$/, ''));
-    // Also update the field in login screen
-    const field = document.getElementById('worker-url');
+  const newUrl = prompt('Cole a chave da API Gemini:', localStorage.getItem('gemini_key') || '');
+  if (newUrl && newUrl.trim()) {
+    localStorage.setItem('gemini_key', newUrl.trim());
+    const field = document.getElementById('gemini-key');
     if (field) field.value = newUrl.trim();
-    alert('URL atualizada! Clique em "Tentar novamente".');
+    alert('Chave atualizada! Clique em "Tentar novamente".');
   }
 }
 
 // ── Diagnostics ───────────────────────────────────────────────────────────────
 async function testScript() {
-  const url = localStorage.getItem('worker_url');
-  if (!url) { alert('URL não configurada.'); return; }
+  const key = localStorage.getItem('gemini_key');
+  if (!key) { alert('Chave da API não configurada.'); return; }
   try {
-    const resp = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(10000) });
-    const text = await resp.text();
-    alert('Resposta do Apps Script:\n' + text.substring(0, 500));
+    const r = await callScript({ mode: 'classify',
+      articles: [{ titulo: 'Test RCT tegoprazan vs esomeprazole GERD', resumo: 'randomized controlled trial' }],
+      elegibilidade: '', motivos: '' });
+    if (r.error) alert('Erro: ' + r.error);
+    else alert('✓ Conexão OK! Resposta: ' + JSON.stringify(r.classifications));
   } catch(e) {
     alert('Erro: ' + e.message);
   }
@@ -1824,7 +1997,7 @@ async function runDedup() {
     if (card) card.querySelector('.card-b').insertAdjacentHTML('afterbegin', pairsHtml);
 
     // IA classification
-    const wurl = localStorage.getItem('worker_url');
+    const wurl = localStorage.getItem('gemini_key');
     if (aiEnabled && wurl) {
       const fBox = area.querySelector('#fuzzy-0');
       if (fBox) {
@@ -1832,7 +2005,7 @@ async function runDedup() {
           const f = await getFuzzyDuplicates(pr);
           renderFuzzyResults(fBox, f, pr, 0);
         } catch(e) {
-          const savedUrl = localStorage.getItem('worker_url') || '(não configurada)';
+          const savedUrl = localStorage.getItem('gemini_key') || '(não configurada)';
           fBox.innerHTML = '<div class="fuzzy-box-h"><span class="fuzzy-badge">IA</span></div>' +
             '<span style="color:var(--text3);font-size:12px">IA indisponível: ' + e.message + '</span>' +
             '<div style="font-size:10px;color:var(--text3);margin-top:6px;word-break:break-all">URL em uso: ' + savedUrl + '</div>' +
@@ -1934,7 +2107,7 @@ function buildBlock(pr, idx) {
         <div class="stat" id="stat-kept-${idx}"><div class="stat-val g" id="kept-val-${idx}">${tKept}</div><div class="stat-lbl" id="kept-lbl-${idx}">Mantidos (−${pct}%)</div></div>
         <div class="stat" id="stat-ia-${idx}"><div class="stat-val r" id="ia-val-${idx}">−0</div><div class="stat-lbl">Excluídos pela IA</div></div>
       </div>
-      ${aiEnabled && localStorage.getItem('worker_url') ? `
+      ${aiEnabled && localStorage.getItem('gemini_key') ? `
       <div class="fuzzy-box" id="fuzzy-${idx}">
         <div class="fuzzy-box-h">
           <span class="fuzzy-badge">IA Fuzzy</span>
