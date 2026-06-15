@@ -1073,19 +1073,32 @@ function buildClassifyPrompt(articles, elegibilidade, motivos) {
     (a.resumo ? '\nRESUMO: ' + a.resumo.substring(0,200) : '')
   ).join('\n\n');
 
-  const motivosList = motivos ||
-    'duplicado, idioma, resumo, observacional, população, desfechos, intervenção, comparador, animais, in vitro, editorial, protocolo, relato de caso, outro tipo de revisão, fase I, errata, proceedings, consenso';
+  // Remove 'resumo' and 'proceedings' from AI options — these depend on full-text
+  // availability/publication type, which the AI cannot determine from title+abstract.
+  // They are handled separately by the auto-exclude-by-type logic.
+  const aiMotivos = (motivos ||
+    'duplicado, idioma, observacional, população, desfechos, intervenção, comparador, animais, in vitro, editorial, protocolo, relato de caso, outro tipo de revisão, fase I, errata, consenso')
+    .split(',').map(s => s.trim())
+    .filter(m => m !== 'resumo' && m !== 'proceedings' && m !== 'duplicado')
+    .join(', ');
 
   const elegCtx = elegibilidade ? '\n\nCRITÉRIO DE ELEGIBILIDADE:\n' + elegibilidade + '\n' : '';
 
   return 'OUTPUT RULE: respond with ONLY a JSON array. No markdown, no explanation, no ``` blocks.' +
     elegCtx + '\n\n' +
-    'Classify each article. Use field "just" (max 3 words). Motivos: incluir, ' + motivosList + '\n\n' +
-    'Rules (in order): congress abstract→resumo; not en/pt/es→idioma; editorial/letter/comment→editorial; ' +
-    'narrative review/guideline→outro tipo de revisão; case report→relato de caso; animal→animais; in vitro→in vitro; ' +
-    'phase I/PK healthy→fase I; observational→observacional; does not meet criteria→appropriate motivo; meets criteria→incluir; unclear→incluir\n\n' +
+    'Classify each article based on its STUDY DESIGN and CONTENT. Use field "just" (max 3 words).\n' +
+    'Available motivos: incluir, ' + aiMotivos + '\n\n' +
+    'IMPORTANT: Do NOT use "resumo" — that is decided separately. Judge by what the study IS:\n' +
+    'Rules (in order): not English/Portuguese/Spanish→idioma; editorial/letter/comment/opinion→editorial; ' +
+    'narrative review/scoping review/guideline/consensus→outro tipo de revisão; case report or series→relato de caso; ' +
+    'animal study→animais; in vitro/lab study→in vitro; phase I or PK/PD in healthy volunteers→fase I; ' +
+    'observational (cohort/case-control/cross-sectional)→observacional; ' +
+    'population not matching criteria→população; intervention not relevant→intervenção; ' +
+    'no proper comparator→comparador; outcomes not relevant→desfechos; ' +
+    'protocol without results→protocolo; erratum→errata; ' +
+    'RCT/systematic review/meta-analysis meeting criteria→incluir; unclear or seems eligible→incluir\n\n' +
     'Articles:\n' + list + '\n\n' +
-    '[{"index":0,"motivo":"incluir","just":"ECR vs IBP"},{"index":1,"motivo":"fase I","just":"PK saudáveis"}]';
+    '[{"index":0,"motivo":"incluir","just":"RCT meets criteria"},{"index":1,"motivo":"fase I","just":"PK healthy"}]';
 }
 
 async function getAIAnalysis(pr) {
