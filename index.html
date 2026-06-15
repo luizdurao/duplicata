@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Origin Health — Deduplicador</title>
+<title>Origin Health — Deduplicador v.36</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
@@ -291,6 +291,13 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
   .pair-decision{font-size:11px;color:var(--text3);margin-top:3px}
   .pair-decision.journal{color:var(--green)}
 
+
+  /* ── PROGRESS BAR ── */
+  .ia-progress-bar{width:100%;height:8px;background:var(--bg3);border-radius:4px;overflow:hidden;margin-top:10px;border:1px solid var(--border)}
+  .ia-progress-fill{height:100%;background:linear-gradient(90deg,var(--green),#5fe08a);border-radius:4px;width:0%;transition:width .3s ease}
+  .ia-progress-text{display:flex;justify-content:space-between;font-size:11px;color:var(--text3);margin-top:6px}
+  .ia-progress-pct{font-weight:700;color:var(--green)}
+
 </style>
 </head>
 <body>
@@ -306,7 +313,7 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
           <circle cx="10" cy="10" r="8"/><path d="M10 6v4l3 3"/>
         </svg>
       </div>
-      <span class="logo-txt">Origin <span>Health v35</span></span>
+      <span class="logo-txt">Origin <span>Health</span></span>
     </div>
     <h1>Acesso à plataforma</h1>
     <p class="sub">Ferramentas de inteligência para pesquisa em saúde</p>
@@ -360,7 +367,7 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
   <main>
     <div class="ph">
       <div class="eyebrow">Ferramenta de dados</div>
-      <div class="ptitle">Deduplicador de Planilhas</div>
+      <div class="ptitle">Deduplicador de Planilhas <span style="font-size:13px;font-weight:600;color:var(--green);background:var(--green-dim);padding:3px 10px;border-radius:20px;vertical-align:middle;margin-left:8px">v.36</span></div>
       <p class="pdesc">Carregue arquivos de qualquer base (.nbib do PubMed, .xlsx do Embase, .ris/.bib de outras bases). A ferramenta converte, unifica, calcula similaridade entre títulos, prioriza artigos em journal sobre conferências, e usa IA para sugerir motivos de exclusão.</p>
     </div>
 
@@ -462,7 +469,7 @@ footer{border-top:1px solid var(--border);padding:18px 28px;display:flex;align-i
         </div>
         <div class="worker-warn" id="worker-warn" style="display:none">
           <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-          <span>Worker não configurado. A IA será desativada automaticamente. Configure a URL na tela de login para habilitar.</span>
+          <span>Chave da API Gemini não configurada. A IA ficará desativada. Configure a chave na tela de login para habilitar.</span>
         </div>
       </div>
     </div>
@@ -1093,6 +1100,17 @@ async function getAIAnalysis(pr) {
   return data.text || '';
 }
 
+
+function updateIAProgress(done, total) {
+  const pct = total ? Math.round(done / total * 100) : 0;
+  const fill = document.getElementById('ia-progress-fill');
+  const pctEl = document.getElementById('ia-progress-pct');
+  const detailEl = document.getElementById('ia-progress-detail');
+  if (fill) fill.style.width = pct + '%';
+  if (pctEl) pctEl.textContent = pct + '%';
+  if (detailEl) detailEl.textContent = done + ' de ' + total + ' artigos';
+}
+
 // Auto-exclude by publication type — returns motivo or null
 function autoExcludeByType(row, tipoCol) {
   const tipo = tipoCol ? (row[tipoCol]||'').toString().toLowerCase() : '';
@@ -1209,10 +1227,11 @@ async function getFuzzyDuplicates(pr) {
       if (quotaHit && !success) { pendingBatches.push(batch); }
 
       done += batch.length;
+      updateIAProgress(Math.min(done, total), total);
       if (progressEl) {
         progressEl.textContent = quotaHit
-          ? '⚠ Cota da IA esgotada — ' + (total - done) + ' artigos pendentes (retome amanhã)'
-          : 'Classificando ' + Math.min(done, total) + ' de ' + total + ' (IA paralela)…';
+          ? '⚠ Cota da IA esgotada — ' + (total - done) + ' artigos pendentes'
+          : 'Classificando artigos (IA paralela)…';
       }
     }
   }
@@ -1278,7 +1297,8 @@ async function resumeClassification(prIdx) {
         }
       } catch(e) { stillPending.push(...batch); }
       done += batch.length;
-      if (progressEl) progressEl.textContent = 'Retomando: ' + done + ' de ' + pending.length + '…';
+      updateIAProgress(done, pending.length);
+      if (progressEl) progressEl.textContent = 'Retomando classificação…';
     }
   }
   await Promise.all(Array.from({length: CONCURRENCY}, () => worker()));
@@ -1761,8 +1781,14 @@ function downloadDuplicates(idx) {
 // 3. Full file — all rows with motivos preenchidos (duplicados + sugestões IA confirmadas)
 function downloadFull(idx) {
   const pr = processedResults[idx];
-  if (!pr) return;
+  if (!pr) { alert('Nenhum resultado para baixar.'); return; }
+  try {
   const wb = XLSX.utils.book_new();
+  const CELL_MAX = 32000; // Excel limit is 32767; truncate with margin
+  const truncate = v => {
+    const s = (v === null || v === undefined) ? '' : String(v);
+    return s.length > CELL_MAX ? s.substring(0, CELL_MAX) + '…[truncado]' : s;
+  };
 
   pr.results.forEach(r => {
     const fk = r.headers[0];
@@ -1817,17 +1843,16 @@ function downloadFull(idx) {
     };
 
     const markedRows = allRows.map(row => {
-      const out = {...row};
-      delete out._src; delete out._li; delete out._reason; delete out._iaMotivo; delete out._baseTipo;
+      // Build output only from defined headers, truncating long cells
+      const out = {};
+      for (const h of r.headers) { out[h] = truncate(row[h]); }
 
       if (row._src === 'removed') {
         out[NEW_STATUS] = 'Excluído';
         out[NEW_MOTIVO] = row._reason || 'duplicado';
       } else {
-        // Check auto-exclude by publication type
         const tipo = tipoCol ? (row[tipoCol]||'').toString().toLowerCase().trim() : '';
         const autoMotivo = Object.entries(AUTO_EXCLUDE).find(([k]) => tipo.includes(k))?.[1];
-
         if (autoMotivo) {
           out[NEW_STATUS] = 'Excluído';
           out[NEW_MOTIVO] = autoMotivo;
@@ -1850,7 +1875,18 @@ function downloadFull(idx) {
     XLSX.utils.book_append_sheet(wb, ws, r.sheetName.substring(0, 31));
   });
 
-  XLSX.writeFile(wb, pr.file.name.replace(/\.xlsx?$/i,'') + '_com_status.xlsx');
+  let baseName = (pr.file.name || 'resultado')
+    .replace(/\.xlsx?$/i, '')
+    .replace(/\s*\+\s*/g, '_')
+    .replace(/[^\w\-]/g, '_')
+    .replace(/_+/g, '_')
+    .substring(0, 80) || 'resultado';
+
+  XLSX.writeFile(wb, baseName + '_com_status.xlsx');
+  } catch(err) {
+    console.error('Erro no download:', err);
+    alert('Erro ao gerar a planilha: ' + err.message);
+  }
 }
 
 // ── Run ───────────────────────────────────────────────────────────────────────
@@ -2114,6 +2150,8 @@ function buildBlock(pr, idx) {
           <span class="ai-box-title">IA classificando motivos de exclusão…</span>
         </div>
         <div class="ai-loading"><div class="spinner"></div><span id="ia-progress">Classificando artigos em batches…</span></div>
+        <div class="ia-progress-bar"><div class="ia-progress-fill" id="ia-progress-fill"></div></div>
+        <div class="ia-progress-text"><span id="ia-progress-detail"></span><span class="ia-progress-pct" id="ia-progress-pct">0%</span></div>
         <div style="font-size:11px;color:var(--text3);margin-top:8px" id="ia-eleg-preview"></div>
       </div>` : ''}
       ${renderRemovedList(pr, idx)}
